@@ -1,0 +1,48 @@
+version: '3'
+
+vars:
+  SDK: '{{.HOME}}/.Garmin/ConnectIQ/Sdks/connectiq-sdk-lin-9.2.0-2026-06-09-92a1605b2'
+  DEVICE: instinct3amoled45mm   # also try: instinct3amoled50mm
+  NAME: HelloGarmin
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  key:
+    desc: Generate the developer signing key (once). Required to compile.
+    status:
+      - test -f developer_key.der
+    cmds:
+      - openssl genrsa -out developer_key.pem 4096
+      - openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem -out developer_key.der -nocrypt
+      - 'echo "Created developer_key.der"'
+
+  build:
+    desc: Compile the watch face into bin/{{.NAME}}.prg
+    deps: [key]
+    cmds:
+      - mkdir -p bin
+      - '{{.SDK}}/bin/monkeyc -d {{.DEVICE}} -f monkey.jungle -o bin/{{.NAME}}.prg -y developer_key.der -w'
+
+  sim:
+    desc: Launch the Connect IQ simulator (foreground — run in its own terminal, then `task run` in another)
+    env:
+      # Hyprland sets QT_QPA_PLATFORM=wayland;xcb; the simulator's bundled Qt is
+      # unreliable on the Wayland plugin, so force xcb (uses XWayland via DISPLAY).
+      QT_QPA_PLATFORM: xcb
+    cmds:
+      - '{{.SDK}}/bin/connectiq'
+
+  run:
+    desc: Push the built app to the running simulator
+    deps: [build]
+    cmds:
+      - '{{.SDK}}/bin/monkeydo bin/{{.NAME}}.prg {{.DEVICE}}'
+
+  clean:
+    desc: Remove build output
+    cmds:
+      - rm -rf bin
