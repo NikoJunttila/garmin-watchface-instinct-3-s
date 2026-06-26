@@ -1,7 +1,11 @@
 # Hello Garmin — minimal Instinct 3 AMOLED watch face
 
-A bare-bones Connect IQ watch face (Monkey C) that displays the current time
-(`HH:MM`, centered, blue). Built for the **Garmin Instinct 3 AMOLED** (45mm + 50mm).
+A small Connect IQ watch face (Monkey C) that displays the current time
+(`HH:MM`, large, white) with the day name and date (`FRI 26.06.26`) beneath it —
+day name in green, date in gray — and a bottom row of live metrics: heart rate
+(red, with a heart icon), steps (blue), and battery (a charge-level battery icon
+plus a percentage colored green/yellow/red by level). All on black. Built for the
+**Garmin Instinct 3 AMOLED** (45mm + 50mm).
 
 Uses the Garmin SDK loaded via `sdkmanager` — Connect IQ **9.2.0**, device API level **6.0**.
 
@@ -14,7 +18,7 @@ source/
   HelloGarminApp.mc       Application.AppBase — returns the initial view
   HelloGarminView.mc      WatchUi.WatchFace  — draws the time in onUpdate()
 resources/
-  layouts/layout.xml      centered TimeLabel
+  layouts/layout.xml      empty (the face is drawn entirely in code)
   strings/strings.xml     app name ("Hello Garmin")
   drawables/              launcher icon + drawables.xml
 developer_key.der         personal signing key (generated, gitignored)
@@ -27,7 +31,12 @@ bin/                      build output (gitignored)
    the entry class (`HelloGarminApp`).
 2. `HelloGarminApp.getInitialView()` returns a `HelloGarminView`.
 3. `HelloGarminView` is a `WatchFace`. The system calls `onUpdate()` ~once a minute;
-   it formats `System.getClockTime()` into `HH:MM` and draws it via the layout.
+   it draws directly on the `Dc`: the time from `System.getClockTime()`, the day name
+   and `dd.mm.yy` date from `Time.Gregorian.info()`, and a metrics row built from
+   `ActivityMonitor` (steps + heart-rate history), `Activity.getActivityInfo()`
+   (live HR during activities), and `System.getSystemStats()` (battery). Drawing in
+   code (rather than layout labels) lets each element use its own colors and icons,
+   centered as a unit. None of these data sources need manifest permissions.
 
 ## Build & run
 
@@ -50,4 +59,4 @@ task run DEVICE=instinct3amoled50mm
 
 - **Always-on display (AOD) / burn-in protection** — required to publish an AMOLED face
   to the Connect IQ Store. The empty `onEnterSleep`/`onExitSleep` in the view are the hooks.
-- Date, battery, steps, complications, custom fonts, user settings.
+- Complications, custom fonts, user settings, configurable metric layout.
