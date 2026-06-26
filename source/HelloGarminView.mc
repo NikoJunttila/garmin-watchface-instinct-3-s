@@ -22,6 +22,15 @@ const WX_CLOUD = 1;
 const WX_RAIN = 2;
 const WX_SNOW = 3;
 
+// ---- Palette -----------------------------------------------------------------
+// A single signature accent (teal) ties the face together: it fills the goal
+// arcs and highlights the key values. Everything else is white / gray on black.
+// Heart rate is the one "vital" exception — it gets a bold red glow so it pops.
+const ACCENT = 0x16D6C4 as Number;       // teal signature accent
+const ACCENT_TRACK = 0x103A37 as Number; // dim teal, for the unfilled arc track
+const HR_CORE = 0xFF4438 as Number;      // bright red heart-rate value
+const HR_GLOW = 0x5A0E0A as Number;      // dim red bloom drawn behind the value
+
 // The watch face itself. The system calls onUpdate roughly once per minute in
 // always-on (low-power) mode, and up to once per second while you're actively
 // looking at the watch (high-power mode).
@@ -51,13 +60,14 @@ class HelloGarminView extends WatchUi.WatchFace {
     function onShow() as Void {
     }
 
-    // Draw the face. In high-power mode we draw the full layout; in low-power
-    // (always-on) mode we draw a reduced, dimmed version to limit lit pixels and
+    // Draw the face. High-power mode gets the full arc-gauge layout; low-power
+    // (always-on) mode gets a reduced, dimmed version to limit lit pixels and
     // avoid per-second updates (AMOLED burn-in protection).
     function onUpdate(dc as Dc) as Void {
         var width = dc.getWidth();
         var height = dc.getHeight();
-        var centerX = width / 2;
+        var cx = width / 2;
+        var cy = height / 2;
 
         // Background — black is effectively "off" on AMOLED, so it costs no power.
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
@@ -73,107 +83,162 @@ class HelloGarminView extends WatchUi.WatchFace {
         }
 
         if (mLowPower) {
-            drawLowPower(dc, centerX, width, height, clockTime);
+            drawLowPower(dc, cx, height, clockTime);
             return;
         }
 
-        // ----- Weather + next sun event, top-center on one row. -----
-        drawWeatherSunRow(dc, centerX, (height * 0.16).toNumber());
+        var info = ActivityMonitor.getInfo();
 
-        // ----- Time — large, white, slightly above the vertical center. -----
+        // ----- Goal arcs hugging the bezel: steps (top), Body Battery (bottom). -----
+        var arcR = cx - 8;
+        drawStepsArc(dc, cx, cy, arcR, info);
+        drawBodyBatteryArc(dc, cx, cy, arcR);
+
+        // ----- Weather + next sun event, just inside the top arc. -----
+        drawWeatherSunRow(dc, cx, (height * 0.205).toNumber());
+
+        // ----- Steps count, in the accent color, beneath the weather row. -----
+        drawSteps(dc, cx, (height * 0.305).toNumber(), info);
+
+        // ----- Time — the dominant element, white, near center. -----
         var timeString = Lang.format("$1$:$2$", [clockTime.hour, clockTime.min.format("%02d")]);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(
-            centerX,
-            (height * 0.38).toNumber(),
-            Graphics.FONT_NUMBER_MEDIUM,
-            timeString,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER
-        );
+        dc.drawText(cx, (height * 0.43).toNumber(), Graphics.FONT_NUMBER_MEDIUM, timeString,
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // ----- Day name + date, e.g. "FRI 26.06.26". -----
-        drawDayDate(dc, centerX, (height * 0.55).toNumber());
+        // ----- Day name (accent) + date (gray). -----
+        drawDayDate(dc, cx, (height * 0.565).toNumber());
 
-        // ----- Body Battery. -----
-        drawBodyBatteryRow(dc, centerX, (height * 0.70).toNumber());
+        // ----- Heart-rate hero: bold red value with a soft glow + heart icon. -----
+        drawHeartRateHero(dc, cx, (height * 0.70).toNumber());
 
-        // ----- Heart rate · steps · battery. -----
-        drawMetricsRow(dc, centerX, (height * 0.84).toNumber());
+        // ----- Body Battery value (accent) + battery, just inside the bottom arc. -----
+        drawBodyBatteryValue(dc, cx, (height * 0.815).toNumber());
+        drawBattery(dc, cx, (height * 0.895).toNumber());
     }
 
     // Reduced always-on face: time + day/date + two slow, dimmed stats. No live
-    // heart rate, no filled icons, dark gray accents — keeps lit pixels low.
-    private function drawLowPower(dc as Dc, centerX as Number, width as Number, height as Number, clockTime as System.ClockTime) as Void {
+    // heart rate, no arcs or filled icons, dark gray accents — keeps lit pixels low.
+    private function drawLowPower(dc as Dc, cx as Number, height as Number, clockTime as System.ClockTime) as Void {
         var timeString = Lang.format("$1$:$2$", [clockTime.hour, clockTime.min.format("%02d")]);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(
-            centerX,
-            (height * 0.42).toNumber(),
-            Graphics.FONT_NUMBER_MEDIUM,
-            timeString,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER
-        );
+        dc.drawText(cx, (height * 0.42).toNumber(), Graphics.FONT_NUMBER_MEDIUM, timeString,
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Day + date, dimmed.
         var info = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
         var dateString = DAY_NAMES[info.day_of_week - 1] + " " + Lang.format("$1$.$2$.$3$", [
             info.day.format("%02d"), info.month.format("%02d"), (info.year % 100).format("%02d")
         ]);
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(centerX, (height * 0.62).toNumber(), Graphics.FONT_SMALL, dateString,
+        dc.drawText(cx, (height * 0.62).toNumber(), Graphics.FONT_SMALL, dateString,
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Two slow stats: Body Battery + steps, dimmed, no icons.
         var bbVal = mBodyBattery;
         var bb = (bbVal == null) ? "--" : bbVal.format("%d");
-        var steps = stepsValue();
-        var low = "BB " + bb + "   " + steps.format("%d");
+        var low = "BB " + bb + "   " + stepsValue().format("%d");
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(centerX, (height * 0.76).toNumber(), Graphics.FONT_TINY, low,
+        dc.drawText(cx, (height * 0.76).toNumber(), Graphics.FONT_TINY, low,
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // Day name (green accent) + date (dim gray), centered as one row at rowY.
-    private function drawDayDate(dc as Dc, centerX as Number, rowY as Number) as Void {
+    // ---- arcs ----------------------------------------------------------------
+
+    // Top goal arc: steps toward the daily goal. Fills clockwise across the top
+    // (left to right) from 160 deg to 20 deg as you approach your goal.
+    private function drawStepsArc(dc as Dc, cx as Number, cy as Number, r as Number, info as ActivityMonitor.Info?) as Void {
+        var frac = 0.0;
+        var steps = (info == null) ? null : info.steps;
+        var goal = (info == null) ? null : info.stepGoal;
+        if (steps != null && goal != null && goal > 0) {
+            frac = steps.toFloat() / goal.toFloat();
+        }
+        drawGaugeArc(dc, cx, cy, r, 160, 20, true, frac);
+    }
+
+    // Bottom goal arc: Body Battery (0-100). Fills counter-clockwise across the
+    // bottom (left to right) from 200 deg to 340 deg.
+    private function drawBodyBatteryArc(dc as Dc, cx as Number, cy as Number, r as Number) as Void {
+        var frac = 0.0;
+        var bb = mBodyBattery;
+        if (bb != null) {
+            frac = bb / 100.0;
+        }
+        drawGaugeArc(dc, cx, cy, r, 200, 340, false, frac);
+    }
+
+    // Draws a goal gauge: a faint full-span track plus an accent-colored fill
+    // covering `frac` (0..1) of the span. `cw` = sweep clockwise (degrees count
+    // down from start) vs counter-clockwise (degrees count up).
+    private function drawGaugeArc(dc as Dc, cx as Number, cy as Number, r as Number, startDeg as Number, endDeg as Number, cw as Boolean, frac as Float) as Void {
+        if (frac < 0.0) { frac = 0.0; }
+        if (frac > 1.0) { frac = 1.0; }
+        var dir = cw ? Graphics.ARC_CLOCKWISE : Graphics.ARC_COUNTER_CLOCKWISE;
+        var span = cw ? (startDeg - endDeg) : (endDeg - startDeg);
+
+        dc.setPenWidth(9);
+        dc.setColor(ACCENT_TRACK, Graphics.COLOR_TRANSPARENT);
+        dc.drawArc(cx, cy, r, dir, startDeg, endDeg);
+
+        if (frac > 0.01) {
+            var fillEnd = cw ? (startDeg - frac * span) : (startDeg + frac * span);
+            dc.setColor(ACCENT, Graphics.COLOR_TRANSPARENT);
+            dc.drawArc(cx, cy, r, dir, startDeg, fillEnd.toNumber());
+        }
+        dc.setPenWidth(1);
+    }
+
+    // ---- center / text fields ------------------------------------------------
+
+    // Day name (accent) + date (dim gray), centered as one row at rowY.
+    private function drawDayDate(dc as Dc, cx as Number, rowY as Number) as Void {
         var info = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
         var dayString = DAY_NAMES[info.day_of_week - 1];
         var dateString = Lang.format("$1$.$2$.$3$", [
-            info.day.format("%02d"),
-            info.month.format("%02d"),
-            (info.year % 100).format("%02d")
+            info.day.format("%02d"), info.month.format("%02d"), (info.year % 100).format("%02d")
         ]);
 
         var rowFont = Graphics.FONT_SMALL;
         var dayWidth = dc.getTextWidthInPixels(dayString, rowFont);
         var sepWidth = dc.getTextWidthInPixels(" ", rowFont);
         var dateWidth = dc.getTextWidthInPixels(dateString, rowFont);
-        var startX = centerX - (dayWidth + sepWidth + dateWidth) / 2;
+        var startX = cx - (dayWidth + sepWidth + dateWidth) / 2;
 
-        dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(ACCENT, Graphics.COLOR_TRANSPARENT);
         dc.drawText(startX, rowY, rowFont, dayString, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(startX + dayWidth + sepWidth, rowY, rowFont, dateString, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // Weather (condition icon + temperature) and the next sun event (sunrise or
-    // sunset icon + time), centered together as one row at rowY. Each part falls
-    // back gracefully: temperature shows a dim "--°" before weather has synced,
-    // and the sun event is simply omitted when there is no location to compute it.
-    private function drawWeatherSunRow(dc as Dc, centerX as Number, rowY as Number) as Void {
-        var font = Graphics.FONT_TINY;
-        var sunFont = Graphics.FONT_XTINY;
+    // Steps count (accent), centered. The top arc shows progress toward the goal.
+    private function drawSteps(dc as Dc, cx as Number, rowY as Number, info as ActivityMonitor.Info?) as Void {
+        var s = (info == null) ? null : info.steps;
+        var steps = (s == null) ? 0 : s;
+        dc.setColor(ACCENT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, rowY, Graphics.FONT_TINY, groupThousands(steps),
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // Body Battery value (accent), centered. The bottom arc shows the level.
+    private function drawBodyBatteryValue(dc as Dc, cx as Number, rowY as Number) as Void {
+        var bbVal = mBodyBattery;
+        var bbText = (bbVal == null) ? "BODY --" : "BODY " + bbVal.format("%d");
+        dc.setColor((bbVal == null) ? Graphics.COLOR_DK_GRAY : ACCENT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, rowY, Graphics.FONT_TINY, bbText, Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // Weather (condition icon + temperature) and the next sun event (icon + time),
+    // centered together as one row. Each part degrades gracefully when unavailable.
+    private function drawWeatherSunRow(dc as Dc, cx as Number, rowY as Number) as Void {
+        var font = Graphics.FONT_XTINY;
         var cond = mWeather;
 
-        // --- Weather part ---
         var temp = (cond == null) ? null : cond.temperature;
         var hasWx = (temp != null);
-        var wxIconW = 18;
-        var wxGap = 6;
-        var tempText = hasWx ? (formatTemperature(temp) + "°") : "--°";
+        var wxIconW = 16;
+        var wxGap = 5;
+        var tempText = (temp != null) ? (formatTemperature(temp) + "°") : "--°";
         var wxW = dc.getTextWidthInPixels(tempText, font) + (hasWx ? wxIconW + wxGap : 0);
 
-        // --- Sun part (next upcoming event) ---
         var sunMoment = null;
         var isRise = true;
         var loc = (cond == null) ? null : cond.observationLocationPosition;
@@ -187,23 +252,22 @@ class HelloGarminView extends WatchUi.WatchFace {
             } else if (sunset != null && nowSec < sunset.value()) {
                 sunMoment = sunset; isRise = false;
             } else if (sunrise != null) {
-                sunMoment = sunrise; isRise = true; // both past today — show today's sunrise as a stand-in
+                sunMoment = sunrise; isRise = true;
             }
         }
-        var sunIconW = 14;
-        var sunGap = 5;
+        var sunIconW = 13;
+        var sunGap = 4;
         var sunText = null;
         var sunW = 0;
         if (sunMoment != null) {
             var t = Gregorian.info(sunMoment, Time.FORMAT_SHORT);
             sunText = Lang.format("$1$:$2$", [t.hour, t.min.format("%02d")]);
-            sunW = sunIconW + sunGap + dc.getTextWidthInPixels(sunText, sunFont);
+            sunW = sunIconW + sunGap + dc.getTextWidthInPixels(sunText, font);
         }
 
-        // --- Center the whole group, then lay parts out left to right. ---
-        var sepGap = 20;
+        var sepGap = 18;
         var total = wxW + ((sunText != null) ? sepGap + sunW : 0);
-        var x = centerX - total / 2;
+        var x = cx - total / 2;
 
         if (hasWx) {
             drawWeatherIcon(dc, x + wxIconW / 2, rowY, weatherCategory(cond.condition));
@@ -218,72 +282,53 @@ class HelloGarminView extends WatchUi.WatchFace {
         if (sunText != null) {
             x += sepGap;
             drawSunIcon(dc, x + sunIconW / 2, rowY, isRise);
-            dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(x + sunIconW + sunGap, rowY, sunFont, sunText, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+            dc.setColor(ACCENT, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(x + sunIconW + sunGap, rowY, font, sunText, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         }
     }
 
-    // Body Battery, centered as one row at rowY: a dim "BB" tag + a fuel-gauge
-    // colored value. Shows "--" before any sample is available.
-    private function drawBodyBatteryRow(dc as Dc, centerX as Number, rowY as Number) as Void {
-        var font = Graphics.FONT_TINY;
-        var tagFont = Graphics.FONT_XTINY;
-        var tagGap = 3;
+    // Heart-rate hero: a heart icon + an oversized bold value with a soft red
+    // glow halo, centered as one group. Shows a dim "--" when no reading exists.
+    private function drawHeartRateHero(dc as Dc, cx as Number, cy as Number) as Void {
+        var hr = getHeartRate();
+        var font = Graphics.FONT_NUMBER_MILD;
 
-        var bbVal = mBodyBattery;
-        var bbText = (bbVal == null) ? "--" : bbVal.format("%d");
-        var bbColor = (bbVal == null) ? Graphics.COLOR_LT_GRAY : levelColor(bbVal);
+        if (hr == null) {
+            drawHeart(dc, cx - 18, cy, 1.4, Graphics.COLOR_DK_GRAY);
+            dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx + 6, cy, font, "--", Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+            return;
+        }
 
-        var x = centerX - cellWidth(dc, "BB", bbText, tagFont, font, tagGap) / 2;
-        drawTaggedCell(dc, x, rowY, "BB", bbText, tagFont, font, tagGap, bbColor);
+        var text = hr.format("%d");
+        var numW = dc.getTextWidthInPixels(text, font);
+        var heartW = 22;
+        var gap = 10;
+        var groupW = heartW + gap + numW;
+        var startX = cx - groupW / 2;
+        var heartCx = startX + heartW / 2;
+        var numCx = startX + heartW + gap + numW / 2;
+
+        drawHeart(dc, heartCx, cy, 1.7, HR_CORE);
+        drawGlowText(dc, numCx, cy, font, text, HR_GLOW, HR_CORE);
     }
 
-    // Draws the heart-rate, steps and battery metrics, centered as one row at
-    // rowY. Each metric is a small icon (drawn battery / heart) or a label-less
-    // color-coded value: heart rate red, steps blue, battery colored by charge.
-    private function drawMetricsRow(dc as Dc, centerX as Number, rowY as Number) as Void {
-        var font = Graphics.FONT_TINY;
-        var iconGap = 4;   // space between an icon and its value
-        var cellGap = 18;  // space between metrics
-
-        // Heart rate — latest reading, or "--" when none is available.
-        var hr = getHeartRate();
-        var hrColor = (hr == null) ? Graphics.COLOR_LT_GRAY : Graphics.COLOR_RED;
-        var hrText = (hr == null) ? "--" : hr.format("%d");
-        var heartW = 14;
-        var hrCellW = heartW + iconGap + dc.getTextWidthInPixels(hrText, font);
-
-        // Steps since midnight.
-        var steps = stepsValue();
-        var stepsText = steps.format("%d");
-        var stepsColor = 0x55AAFF;
-        var stepsCellW = dc.getTextWidthInPixels(stepsText, font);
-
-        // Battery percentage, colored by charge level.
+    // Battery: a glyph + percentage, centered. Accent normally; red when critically
+    // low (the one place we break the single-accent rule, as a safety signal).
+    private function drawBattery(dc as Dc, cx as Number, cy as Number) as Void {
         var battery = System.getSystemStats().battery;
         var batText = (battery + 0.5).toNumber().format("%d") + "%";
-        var batColor = (battery <= 15) ? Graphics.COLOR_RED
-                     : (battery <= 35) ? Graphics.COLOR_YELLOW
-                     : Graphics.COLOR_GREEN;
-        var batBodyW = 20;
-        var batIconW = batBodyW + 3; // body + terminal nub
-        var batCellW = batIconW + iconGap + dc.getTextWidthInPixels(batText, font);
+        var color = (battery <= 15) ? Graphics.COLOR_RED : ACCENT;
+        var font = Graphics.FONT_XTINY;
+        var bodyW = 18;
+        var iconW = bodyW + 3;
+        var gap = 5;
+        var total = iconW + gap + dc.getTextWidthInPixels(batText, font);
+        var x = cx - total / 2;
 
-        // Center the three cells as one group, then lay them out left to right.
-        var x = centerX - (hrCellW + cellGap + stepsCellW + cellGap + batCellW) / 2;
-
-        drawHeart(dc, x + heartW / 2, rowY, hrColor);
-        dc.setColor(hrColor, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + heartW + iconGap, rowY, font, hrText, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        x += hrCellW + cellGap;
-
-        dc.setColor(stepsColor, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x, rowY, font, stepsText, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        x += stepsCellW + cellGap;
-
-        drawBatteryIcon(dc, x, rowY, batBodyW, 11, battery, batColor);
-        dc.setColor(batColor, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + batIconW + iconGap, rowY, font, batText, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        drawBatteryIcon(dc, x, cy, bodyW, 10, battery, color);
+        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + iconW + gap, cy, font, batText, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     // ---- data getters (all null-safe) ----------------------------------------
@@ -334,6 +379,21 @@ class HelloGarminView extends WatchUi.WatchFace {
 
     // ---- formatting / color helpers ------------------------------------------
 
+    // Thousands-separated step count, e.g. 8431 -> "8,431".
+    private function groupThousands(n as Number) as String {
+        var s = n.format("%d");
+        var out = "";
+        var c = 0;
+        for (var i = s.length() - 1; i >= 0; i -= 1) {
+            out = s.substring(i, i + 1) + out;
+            c += 1;
+            if (c % 3 == 0 && i > 0) {
+                out = "," + out;
+            }
+        }
+        return out;
+    }
+
     // Weather temperatures come from the API in Celsius; convert to the device's
     // configured unit before display.
     private function formatTemperature(tempC as Number) as String {
@@ -341,13 +401,6 @@ class HelloGarminView extends WatchUi.WatchFace {
             return ((tempC * 9.0 / 5.0) + 32.0 + 0.5).toNumber().format("%d");
         }
         return tempC.format("%d");
-    }
-
-    // Fuel-gauge coloring (Body Battery): high = green, low = red.
-    private function levelColor(level as Number) as Number {
-        return (level <= 25) ? Graphics.COLOR_RED
-             : (level <= 50) ? Graphics.COLOR_YELLOW
-             : Graphics.COLOR_GREEN;
     }
 
     // Bucket a Weather.CONDITION_* value into one of our four drawable icons.
@@ -394,32 +447,41 @@ class HelloGarminView extends WatchUi.WatchFace {
         }
     }
 
-    // ---- small primitives ----------------------------------------------------
+    // ---- drawing primitives --------------------------------------------------
 
-    // Width of a "tag + value" cell (used to center a row before drawing it).
-    private function cellWidth(dc as Dc, tag as String, value as String, tagFont as Graphics.FontDefinition, valFont as Graphics.FontDefinition, gap as Number) as Number {
-        return dc.getTextWidthInPixels(tag, tagFont) + gap + dc.getTextWidthInPixels(value, valFont);
+    // Draws `text` with a soft glow: several dim passes offset around the center
+    // build a bloom, then the bright core is drawn on top. Approximates a glow
+    // without alpha blending (which the Dc text API doesn't offer).
+    private function drawGlowText(dc as Dc, cx as Number, cy as Number, font as Graphics.FontDefinition, text as String, glow as Number, core as Number) as Void {
+        var offsets = [
+            [-2, 0], [2, 0], [0, -2], [0, 2],
+            [-2, -2], [2, -2], [-2, 2], [2, 2],
+            [-3, 0], [3, 0], [0, -3], [0, 3]
+        ];
+        dc.setColor(glow, Graphics.COLOR_TRANSPARENT);
+        for (var i = 0; i < offsets.size(); i += 1) {
+            dc.drawText(cx + offsets[i][0], cy + offsets[i][1], font, text,
+                Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        }
+        dc.setColor(core, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy, font, text, Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // Draws a dim tag + colored value at x; returns the x just past the value.
-    private function drawTaggedCell(dc as Dc, x as Number, rowY as Number, tag as String, value as String, tagFont as Graphics.FontDefinition, valFont as Graphics.FontDefinition, gap as Number, valColor as Number) as Number {
-        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x, rowY, tagFont, tag, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        var tagW = dc.getTextWidthInPixels(tag, tagFont);
-        dc.setColor(valColor, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + tagW + gap, rowY, valFont, value, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        return x + tagW + gap + dc.getTextWidthInPixels(value, valFont);
-    }
-
-    // A small filled heart centered at (cx, cy): two top lobes + a point.
-    private function drawHeart(dc as Dc, cx as Number, cy as Number, color as Number) as Void {
+    // A filled heart centered at (cx, cy): two top lobes + a point. `s` scales it
+    // (1.0 ~= the original small glyph).
+    private function drawHeart(dc as Dc, cx as Number, cy as Number, s as Float, color as Number) as Void {
+        var lobeR = (4 * s).toNumber();
+        var dx = (3 * s).toNumber();
+        var dy = (1 * s).toNumber();
+        var pw = (6 * s).toNumber();
+        var ph = (7 * s).toNumber();
         dc.setColor(color, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(cx - 3, cy - 1, 4);
-        dc.fillCircle(cx + 3, cy - 1, 4);
+        dc.fillCircle(cx - dx, cy - dy, lobeR);
+        dc.fillCircle(cx + dx, cy - dy, lobeR);
         dc.fillPolygon([
-            [cx - 6, cy],
-            [cx + 6, cy],
-            [cx, cy + 7]
+            [cx - pw, cy],
+            [cx + pw, cy],
+            [cx, cy + ph]
         ] as Array<Graphics.Point2D>);
     }
 
@@ -430,10 +492,8 @@ class HelloGarminView extends WatchUi.WatchFace {
         dc.setColor(color, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(1);
         dc.drawRectangle(x, top, bodyW, bodyH);
-        // Terminal nub on the right.
         var nubH = bodyH / 2;
         dc.fillRectangle(x + bodyW, cy - nubH / 2, 2, nubH);
-        // Charge-level fill.
         var pad = 2;
         var fillW = ((bodyW - 2 * pad) * pct / 100.0).toNumber();
         if (fillW > 0) {
@@ -445,26 +505,25 @@ class HelloGarminView extends WatchUi.WatchFace {
     private function drawWeatherIcon(dc as Dc, cx as Number, cy as Number, cat as Number) as Void {
         if (cat == WX_SUN) {
             dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
-            dc.fillCircle(cx, cy, 5);
+            dc.fillCircle(cx, cy, 4);
             dc.setPenWidth(1);
             for (var i = 0; i < 8; i += 1) {
                 var a = i * Math.PI / 4.0;
-                var x1 = cx + (7 * Math.cos(a)).toNumber();
-                var y1 = cy + (7 * Math.sin(a)).toNumber();
-                var x2 = cx + (9 * Math.cos(a)).toNumber();
-                var y2 = cy + (9 * Math.sin(a)).toNumber();
+                var x1 = cx + (6 * Math.cos(a)).toNumber();
+                var y1 = cy + (6 * Math.sin(a)).toNumber();
+                var x2 = cx + (8 * Math.cos(a)).toNumber();
+                var y2 = cy + (8 * Math.sin(a)).toNumber();
                 dc.drawLine(x1, y1, x2, y2);
             }
             return;
         }
-        // Cloud body, shared by cloud/rain/snow.
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(cx - 4, cy, 4);
         dc.fillCircle(cx + 2, cy - 2, 5);
         dc.fillCircle(cx + 5, cy + 1, 4);
         dc.fillRectangle(cx - 4, cy + 1, 11, 4);
         if (cat == WX_RAIN) {
-            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+            dc.setColor(ACCENT, Graphics.COLOR_TRANSPARENT);
             dc.fillRectangle(cx - 3, cy + 6, 1, 3);
             dc.fillRectangle(cx + 1, cy + 6, 1, 3);
             dc.fillRectangle(cx + 5, cy + 6, 1, 3);
@@ -478,10 +537,10 @@ class HelloGarminView extends WatchUi.WatchFace {
 
     // A small sun-on-horizon glyph with an up (sunrise) or down (sunset) arrow.
     private function drawSunIcon(dc as Dc, cx as Number, cy as Number, isRise as Boolean) as Void {
-        dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(ACCENT, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(cx, cy, 3);
         dc.setPenWidth(1);
-        dc.drawLine(cx - 7, cy + 4, cx + 7, cy + 4); // horizon
+        dc.drawLine(cx - 7, cy + 4, cx + 7, cy + 4);
         if (isRise) {
             dc.fillPolygon([[cx, cy - 8], [cx - 3, cy - 4], [cx + 3, cy - 4]] as Array<Graphics.Point2D>);
         } else {
