@@ -15,8 +15,12 @@
             <iq:product id="instinct3amoled50mm"/>
         </iq:products>
 
-        <!-- System permissions (none needed yet). -->
-        <iq:permissions/>
+        <!-- System permissions. SensorHistory is required to read Body Battery
+             (SensorHistory.getBodyBatteryHistory). Everything else the face shows
+             — stress, intensity minutes, weather, sunrise/sunset — needs none. -->
+        <iq:permissions>
+            <iq:uses-permission id="SensorHistory"/>
+        </iq:permissions>
 
         <!-- Supported languages. -->
         <iq:languages>
