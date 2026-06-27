@@ -14,17 +14,15 @@ import Toybox.WatchUi;
 // fixed table keeps the output deterministic and locale-independent.)
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as Array<String>;
 
-// A monochrome "data face" for the Instinct 3 Solar: a 176x176, 1-bit (black +
-// white only) MIP, semi-octagon display with the iconic top-right circular
-// sub-window. Everything is white on black — there is no grey or accent color
-// available, so layout and clear shapes carry the design, not color.
+// "Nordic": a monochrome data face for the Instinct 3 Solar (176x176, 1-bit
+// black + white MIP, semi-octagon with a top-right circular sub-window).
 //
-// Layout (HH:MM is the hero; HR lives in the sub-window; stats sit in a row):
-//   GARMIN                (brand, top center)
-//   SAT 27.06     (HR)    (date top-left; heart-rate inside the sub-window)
-//        8:25             (big time, center)
-//   STEPS  BODY  BATT     (a divided 3-column stat row)
-//   8,431   62    87%
+// Layout, adapted from a Garmin reference to this hardware:
+//   - Left column: three icon+value rows  (heart rate / steps / body battery)
+//   - Top-right circular sub-window: the date  ("SAT" over "10")
+//   - Center-low: a big split time  ("03  55")
+//   - Bottom: a status-icon row  (battery, + notifications/alarm/bluetooth when active)
+//   - Thin white lines separate the sections, with accent ticks at 12 & 6 o'clock.
 class NordicView extends WatchUi.WatchFace {
 
     // SensorHistory (Body Battery) reads aren't free, and in high-power mode
@@ -50,7 +48,6 @@ class NordicView extends WatchUi.WatchFace {
     // shown, the system's once-per-minute updates in low power cover it.
     function onUpdate(dc as Dc) as Void {
         var width = dc.getWidth();
-        var height = dc.getHeight();
         var cx = width / 2;
 
         // Background.
@@ -66,37 +63,28 @@ class NordicView extends WatchUi.WatchFace {
         }
 
         var info = ActivityMonitor.getInfo();
+        var settings = System.getDeviceSettings();
 
-        // ----- Date, top-left (e.g. "SAT 27.06"). -----
-        drawDate(dc);
-
-        // ----- Heart rate, inside the top-right circular sub-window. -----
-        drawHeartRate(dc, width, height);
-
-        // ----- Time — the dominant element, centered. -----
-        var timeString = Lang.format("$1$:$2$", [clockTime.hour, clockTime.min.format("%02d")]);
+        // ----- Section dividers + 12/6 o'clock accent ticks. -----
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, 84, Graphics.FONT_NUMBER_THAI_HOT, timeString,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setPenWidth(2);
+        dc.drawLine(cx, 2, cx, 8);        // top tick
+        dc.drawLine(cx, 169, cx, 174);    // bottom tick
+        dc.drawLine(12, 85, 164, 85);     // above the time
+        dc.drawLine(12, 151, 164, 151);   // below the date
+        dc.setPenWidth(1);
 
-        // ----- Bottom stat row: steps | body battery | battery %. -----
-        drawStatRow(dc, info);
+        drawHeartCircle(dc);
+        drawLeftColumn(dc, info);
+        drawBigTime(dc, cx, clockTime);
+        drawDateLine(dc, cx);
+        drawStatusIcons(dc, cx, settings);
     }
 
-    // Date as "DAY DD.MM", left-justified just below the top-left chamfer.
-    private function drawDate(dc as Dc) as Void {
-        var info = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
-        var dateString = DAY_NAMES[info.day_of_week - 1] + " "
-            + Lang.format("$1$.$2$", [info.day.format("%02d"), info.month.format("%02d")]);
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(16, 40, Graphics.FONT_SMALL, dateString,
-            Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-    }
-
-    // Heart rate in the round sub-window: a white ring, a small heart glyph, and
-    // the bpm number (or "--"). Geometry comes from WatchUi.getSubscreen() so it
-    // lands exactly in the hardware sub-window; falls back to known coordinates.
-    private function drawHeartRate(dc as Dc, width as Number, height as Number) as Void {
+    // Heart rate in the top-right circular sub-window: a white ring, a heart
+    // glyph, and the bpm number (or "--"). Geometry comes from WatchUi.getSubscreen()
+    // so it lands exactly in the hardware window; falls back to known coordinates.
+    private function drawHeartCircle(dc as Dc) as Void {
         var sx; var sy; var sr;
         var sub = WatchUi.getSubscreen();
         if (sub != null) {
@@ -107,61 +95,172 @@ class NordicView extends WatchUi.WatchFace {
             sx = 144; sy = 31; sr = 31;
         }
 
-        // Ring (kept 1px inside the window so the 2px stroke doesn't clip).
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(2);
         dc.drawCircle(sx, sy, sr - 1);
         dc.setPenWidth(1);
 
-        // Heart glyph above center.
         drawHeart(dc, sx, sy - 10, 1.0, Graphics.COLOR_WHITE);
-
-        // bpm number below center.
         var hr = getHeartRate();
-        var hrText = (hr == null) ? "--" : hr.format("%d");
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(sx, sy + 8, Graphics.FONT_XTINY, hrText,
+        dc.drawText(sx, sy + 8, Graphics.FONT_XTINY, (hr == null) ? "--" : hr.format("%d"),
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // The bottom stat bar: a top divider line, two vertical separators, and three
-    // columns (steps / body battery / battery %), each an icon over a value.
-    private function drawStatRow(dc as Dc, info as ActivityMonitor.Info?) as Void {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        dc.drawLine(16, 114, 160, 114);   // top divider
-        dc.drawLine(64, 118, 64, 150);    // separator 1
-        dc.drawLine(112, 118, 112, 150);  // separator 2
-        dc.setPenWidth(1);
+    // Left column: two rows, each an icon (left) + value (right): steps, then
+    // Body Battery. Each value shows "--" when unavailable.
+    private function drawLeftColumn(dc as Dc, info as ActivityMonitor.Info?) as Void {
+        var xIcon = 22;
+        var xVal = 38;
 
         // Steps.
+        drawStepsIcon(dc, xIcon, 50);
         var s = (info == null) ? null : info.steps;
-        var stepsText = groupThousands((s == null) ? 0 : s);
+        drawValue(dc, xVal, 50, groupThousands((s == null) ? 0 : s));
 
         // Body Battery (cached).
+        drawBodyIcon(dc, xIcon, 73);
         var bb = mBodyBattery;
-        var bodyText = (bb == null) ? "--" : bb.format("%d");
+        drawValue(dc, xVal, 73, (bb == null) ? "--" : bb.format("%d"));
+    }
 
-        // Watch battery.
-        var battery = System.getSystemStats().battery;
-        var battText = (battery + 0.5).toNumber().format("%d") + "%";
-
-        var iconY = 125;
-        drawStepsIcon(dc, 40, iconY);
-        drawBodyIcon(dc, 88, iconY);
-        drawBatteryIcon(dc, 136, iconY, battery);
-
-        var valueY = 143;
+    private function drawValue(dc as Dc, x as Number, y as Number, text as String) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(40, valueY, Graphics.FONT_XTINY, stepsText,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.drawText(88, valueY, Graphics.FONT_XTINY, bodyText,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.drawText(136, valueY, Graphics.FONT_XTINY, battText,
+        dc.drawText(x, y, Graphics.FONT_XTINY, text,
+            Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // The hero: a big time split into two halves with a center gap (no colon),
+    // e.g. "03  55", centered low on the face.
+    private function drawBigTime(dc as Dc, cx as Number, clockTime as System.ClockTime) as Void {
+        var hh = clockTime.hour.format("%02d");
+        var mm = clockTime.min.format("%02d");
+        var font = Graphics.FONT_NUMBER_THAI_HOT;
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx - 10, 109, font, hh,
+            Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(cx + 10, 109, font, mm,
+            Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // The date directly below the time, in a small font (e.g. "SAT 27.06").
+    private function drawDateLine(dc as Dc, cx as Number) as Void {
+        var info = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
+        var text = DAY_NAMES[info.day_of_week - 1] + " "
+            + Lang.format("$1$.$2$", [info.day.format("%02d"), info.month.format("%02d")]);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, 140, Graphics.FONT_XTINY, text,
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // ---- stat icons (all white, centered at (cx, cy), ~16px tall) -------------
+    // Bottom status row: the watch battery is always shown; notifications, alarm,
+    // and Bluetooth appear only when active. The shown icons are centered together.
+    private function drawStatusIcons(dc as Dc, cx as Number, settings as System.DeviceSettings) as Void {
+        var icons = [:battery] as Array<Symbol>;
+
+        var notif = settings.notificationCount;
+        if (notif != null && notif > 0) {
+            icons.add(:bell);
+        }
+        var alarms = settings.alarmCount;
+        if (alarms != null && alarms > 0) {
+            icons.add(:alarm);
+        }
+        if (settings.phoneConnected) {
+            icons.add(:bluetooth);
+        }
+
+        var n = icons.size();
+        var slot = 28;
+        var startC = cx - (n - 1) * slot / 2;
+        var y = 160;
+        for (var i = 0; i < n; i += 1) {
+            var xc = startC + i * slot;
+            var k = icons[i];
+            if (k == :battery) {
+                drawBatteryIcon(dc, xc, y, System.getSystemStats().battery);
+            } else if (k == :bell) {
+                drawBellIcon(dc, xc, y);
+            } else if (k == :alarm) {
+                drawAlarmIcon(dc, xc, y);
+            } else {
+                drawBluetoothIcon(dc, xc, y);
+            }
+        }
+    }
+
+    // ---- data getters (all null-safe) ----------------------------------------
+
+    // Most recent heart rate in bpm, or null when no valid reading is available.
+    // Prefers Activity.Info (live during an activity); otherwise falls back to
+    // the newest all-day sample from ActivityMonitor's heart-rate history.
+    private function getHeartRate() as Number? {
+        var info = Activity.getActivityInfo();
+        if (info != null && info.currentHeartRate != null) {
+            return info.currentHeartRate;
+        }
+        var iterator = ActivityMonitor.getHeartRateHistory(1, true);
+        if (iterator != null) {
+            var sample = iterator.next();
+            if (sample != null && sample.heartRate != null
+                    && sample.heartRate != ActivityMonitor.INVALID_HR_SAMPLE) {
+                return sample.heartRate;
+            }
+        }
+        return null;
+    }
+
+    // Newest Body Battery sample (0-100), or null. Requires the SensorHistory
+    // permission; the `has` guards keep it safe if the device lacks the API.
+    private function getBodyBattery() as Number? {
+        if (!(Toybox has :SensorHistory) || !(SensorHistory has :getBodyBatteryHistory)) {
+            return null;
+        }
+        var iterator = SensorHistory.getBodyBatteryHistory({ :period => 1, :order => SensorHistory.ORDER_NEWEST_FIRST });
+        if (iterator != null) {
+            var sample = iterator.next();
+            if (sample != null && sample.data != null) {
+                return sample.data.toNumber();
+            }
+        }
+        return null;
+    }
+
+    // ---- formatting ----------------------------------------------------------
+
+    // Thousands-separated step count, e.g. 8431 -> "8,431".
+    private function groupThousands(n as Number) as String {
+        var s = n.format("%d");
+        var out = "";
+        var c = 0;
+        for (var i = s.length() - 1; i >= 0; i -= 1) {
+            out = s.substring(i, i + 1) + out;
+            c += 1;
+            if (c % 3 == 0 && i > 0) {
+                out = "," + out;
+            }
+        }
+        return out;
+    }
+
+    // ---- icons (all white, centered at (cx, cy), ~14-16px) --------------------
+
+    // A filled heart: two top lobes + a point. `s` scales it (1.0 ~= ~12px).
+    private function drawHeart(dc as Dc, cx as Number, cy as Number, s as Float, color as Number) as Void {
+        var lobeR = (4 * s).toNumber();
+        var dx = (3 * s).toNumber();
+        var dy = (1 * s).toNumber();
+        var pw = (6 * s).toNumber();
+        var ph = (7 * s).toNumber();
+        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(cx - dx, cy - dy, lobeR);
+        dc.fillCircle(cx + dx, cy - dy, lobeR);
+        dc.fillPolygon([
+            [cx - pw, cy],
+            [cx + pw, cy],
+            [cx, cy + ph]
+        ] as Array<Graphics.Point2D>);
+    }
 
     // Steps: a single footprint — toe dots above a ball + heel sole.
     private function drawStepsIcon(dc as Dc, cx as Number, cy as Number) as Void {
@@ -204,76 +303,41 @@ class NordicView extends WatchUi.WatchFace {
         }
     }
 
-    // ---- data getters (all null-safe) ----------------------------------------
-
-    // Most recent heart rate in bpm, or null when no valid reading is available.
-    // Prefers Activity.Info (live during an activity); otherwise falls back to
-    // the newest all-day sample from ActivityMonitor's heart-rate history.
-    private function getHeartRate() as Number? {
-        var info = Activity.getActivityInfo();
-        if (info != null && info.currentHeartRate != null) {
-            return info.currentHeartRate;
-        }
-        var iterator = ActivityMonitor.getHeartRateHistory(1, true);
-        if (iterator != null) {
-            var sample = iterator.next();
-            if (sample != null && sample.heartRate != null
-                    && sample.heartRate != ActivityMonitor.INVALID_HR_SAMPLE) {
-                return sample.heartRate;
-            }
-        }
-        return null;
-    }
-
-    // Newest Body Battery sample (0-100), or null. Requires the SensorHistory
-    // permission; the `has` guards keep it safe if the device lacks the API.
-    private function getBodyBattery() as Number? {
-        if (!(Toybox has :SensorHistory) || !(SensorHistory has :getBodyBatteryHistory)) {
-            return null;
-        }
-        var iterator = SensorHistory.getBodyBatteryHistory({ :period => 1, :order => SensorHistory.ORDER_NEWEST_FIRST });
-        if (iterator != null) {
-            var sample = iterator.next();
-            if (sample != null && sample.data != null) {
-                return sample.data.toNumber();
-            }
-        }
-        return null;
-    }
-
-    // ---- formatting / drawing helpers ----------------------------------------
-
-    // Thousands-separated step count, e.g. 8431 -> "8,431".
-    private function groupThousands(n as Number) as String {
-        var s = n.format("%d");
-        var out = "";
-        var c = 0;
-        for (var i = s.length() - 1; i >= 0; i -= 1) {
-            out = s.substring(i, i + 1) + out;
-            c += 1;
-            if (c % 3 == 0 && i > 0) {
-                out = "," + out;
-            }
-        }
-        return out;
-    }
-
-    // A filled heart centered at (cx, cy): two top lobes + a point. `s` scales it
-    // (1.0 ~= a small ~12px glyph).
-    private function drawHeart(dc as Dc, cx as Number, cy as Number, s as Float, color as Number) as Void {
-        var lobeR = (4 * s).toNumber();
-        var dx = (3 * s).toNumber();
-        var dy = (1 * s).toNumber();
-        var pw = (6 * s).toNumber();
-        var ph = (7 * s).toNumber();
-        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(cx - dx, cy - dy, lobeR);
-        dc.fillCircle(cx + dx, cy - dy, lobeR);
+    // Notifications: a bell with a clapper.
+    private function drawBellIcon(dc as Dc, cx as Number, cy as Number) as Void {
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(cx, cy - 5, 1);          // top knob
         dc.fillPolygon([
-            [cx - pw, cy],
-            [cx + pw, cy],
-            [cx, cy + ph]
-        ] as Array<Graphics.Point2D>);
+            [cx - 5, cy + 3],
+            [cx + 5, cy + 3],
+            [cx + 3, cy - 3],
+            [cx - 3, cy - 3]
+        ] as Array<Graphics.Point2D>);         // bell body
+        dc.fillRectangle(cx - 6, cy + 3, 12, 1);   // rim
+        dc.fillCircle(cx, cy + 6, 1);          // clapper
+    }
+
+    // Alarm: a little clock face with hands and two feet.
+    private function drawAlarmIcon(dc as Dc, cx as Number, cy as Number) as Void {
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(1);
+        dc.drawCircle(cx, cy, 5);
+        dc.drawLine(cx, cy, cx, cy - 3);       // minute hand
+        dc.drawLine(cx, cy, cx + 3, cy + 1);   // hour hand
+        dc.drawLine(cx - 4, cy - 5, cx - 6, cy - 7);   // left foot/ear
+        dc.drawLine(cx + 4, cy - 5, cx + 6, cy - 7);   // right foot/ear
+    }
+
+    // Bluetooth: the rune (spine + two crossing diagonals to the right humps).
+    private function drawBluetoothIcon(dc as Dc, cx as Number, cy as Number) as Void {
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        dc.drawLine(cx, cy - 6, cx, cy + 6);       // spine
+        dc.drawLine(cx, cy - 6, cx + 4, cy - 2);   // top to upper-right hump
+        dc.drawLine(cx + 4, cy - 2, cx - 4, cy + 2);
+        dc.drawLine(cx - 4, cy - 2, cx + 4, cy + 2);
+        dc.drawLine(cx + 4, cy + 2, cx, cy + 6);   // lower-right hump to bottom
+        dc.setPenWidth(1);
     }
 
     function onHide() as Void {
