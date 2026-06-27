@@ -31,13 +31,27 @@ class NordicView extends WatchUi.WatchFace {
     private var mCacheMin as Number = -1;
     private var mBodyBattery as Number? = null;
 
+    // Stat icons, loaded once from SVG drawables (see resources/drawables).
+    private var mIconHeart as WatchUi.BitmapResource?;
+    private var mIconSteps as WatchUi.BitmapResource?;
+    private var mIconBody as WatchUi.BitmapResource?;
+    private var mIconBell as WatchUi.BitmapResource?;
+    private var mIconAlarm as WatchUi.BitmapResource?;
+    private var mIconBt as WatchUi.BitmapResource?;
+
     function initialize() {
         WatchFace.initialize();
     }
 
-    // Load the (empty) layout once; the face is drawn entirely in onUpdate.
+    // Load the (empty) layout and the icon bitmaps once.
     function onLayout(dc as Dc) as Void {
         setLayout(Rez.Layouts.WatchFace(dc));
+        mIconHeart = WatchUi.loadResource(Rez.Drawables.IconHeart) as WatchUi.BitmapResource;
+        mIconSteps = WatchUi.loadResource(Rez.Drawables.IconSteps) as WatchUi.BitmapResource;
+        mIconBody = WatchUi.loadResource(Rez.Drawables.IconBody) as WatchUi.BitmapResource;
+        mIconBell = WatchUi.loadResource(Rez.Drawables.IconBell) as WatchUi.BitmapResource;
+        mIconAlarm = WatchUi.loadResource(Rez.Drawables.IconAlarm) as WatchUi.BitmapResource;
+        mIconBt = WatchUi.loadResource(Rez.Drawables.IconBluetooth) as WatchUi.BitmapResource;
     }
 
     function onShow() as Void {
@@ -100,7 +114,7 @@ class NordicView extends WatchUi.WatchFace {
         dc.drawCircle(sx, sy, sr - 1);
         dc.setPenWidth(1);
 
-        drawHeart(dc, sx, sy - 10, 1.0, Graphics.COLOR_WHITE);
+        drawIcon(dc, mIconHeart, sx, sy - 9);
         var hr = getHeartRate();
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(sx, sy + 8, Graphics.FONT_XTINY, (hr == null) ? "--" : hr.format("%d"),
@@ -114,12 +128,12 @@ class NordicView extends WatchUi.WatchFace {
         var xVal = 38;
 
         // Steps.
-        drawStepsIcon(dc, xIcon, 50);
+        drawIcon(dc, mIconSteps, xIcon, 50);
         var s = (info == null) ? null : info.steps;
         drawValue(dc, xVal, 50, groupThousands((s == null) ? 0 : s));
 
         // Body Battery (cached).
-        drawBodyIcon(dc, xIcon, 73);
+        drawIcon(dc, mIconBody, xIcon, 73);
         var bb = mBodyBattery;
         drawValue(dc, xVal, 73, (bb == null) ? "--" : bb.format("%d"));
     }
@@ -180,11 +194,11 @@ class NordicView extends WatchUi.WatchFace {
             if (k == :battery) {
                 drawBatteryIcon(dc, xc, y, System.getSystemStats().battery);
             } else if (k == :bell) {
-                drawBellIcon(dc, xc, y);
+                drawIcon(dc, mIconBell, xc, y);
             } else if (k == :alarm) {
-                drawAlarmIcon(dc, xc, y);
+                drawIcon(dc, mIconAlarm, xc, y);
             } else {
-                drawBluetoothIcon(dc, xc, y);
+                drawIcon(dc, mIconBt, xc, y);
             }
         }
     }
@@ -243,52 +257,13 @@ class NordicView extends WatchUi.WatchFace {
         return out;
     }
 
-    // ---- icons (all white, centered at (cx, cy), ~14-16px) --------------------
+    // ---- icons ---------------------------------------------------------------
 
-    // A filled heart: two top lobes + a point. `s` scales it (1.0 ~= ~12px).
-    private function drawHeart(dc as Dc, cx as Number, cy as Number, s as Float, color as Number) as Void {
-        var lobeR = (4 * s).toNumber();
-        var dx = (3 * s).toNumber();
-        var dy = (1 * s).toNumber();
-        var pw = (6 * s).toNumber();
-        var ph = (7 * s).toNumber();
-        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(cx - dx, cy - dy, lobeR);
-        dc.fillCircle(cx + dx, cy - dy, lobeR);
-        dc.fillPolygon([
-            [cx - pw, cy],
-            [cx + pw, cy],
-            [cx, cy + ph]
-        ] as Array<Graphics.Point2D>);
-    }
-
-    // Steps: a single footprint — toe dots above a ball + heel sole.
-    private function drawStepsIcon(dc as Dc, cx as Number, cy as Number) as Void {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(cx - 3, cy - 6, 1);
-        dc.fillCircle(cx - 1, cy - 7, 1);
-        dc.fillCircle(cx + 1, cy - 7, 1);
-        dc.fillCircle(cx + 3, cy - 6, 1);
-        dc.fillCircle(cx, cy - 1, 4);          // ball of the foot
-        dc.fillCircle(cx - 1, cy + 5, 3);      // heel
-        dc.fillPolygon([
-            [cx - 4, cy - 1],
-            [cx + 4, cy - 1],
-            [cx + 2, cy + 5],
-            [cx - 4, cy + 5]
-        ] as Array<Graphics.Point2D>);         // arch joining ball to heel
-    }
-
-    // Body Battery: a person silhouette (head + torso) — "your body's" energy.
-    private function drawBodyIcon(dc as Dc, cx as Number, cy as Number) as Void {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(cx, cy - 5, 3);          // head
-        dc.fillPolygon([
-            [cx - 5, cy + 6],
-            [cx + 5, cy + 6],
-            [cx + 3, cy - 2],
-            [cx - 3, cy - 2]
-        ] as Array<Graphics.Point2D>);         // shoulders / torso
+    // Draw a bitmap icon centered at (cx, cy). No-op if it failed to load.
+    private function drawIcon(dc as Dc, bmp as WatchUi.BitmapResource?, cx as Number, cy as Number) as Void {
+        if (bmp != null) {
+            dc.drawBitmap(cx - bmp.getWidth() / 2, cy - bmp.getHeight() / 2, bmp);
+        }
     }
 
     // Watch battery: an outlined cell + terminal nub + a charge-level fill.
@@ -301,43 +276,6 @@ class NordicView extends WatchUi.WatchFace {
         if (fillW > 0) {
             dc.fillRectangle(cx - 6, cy - 2, fillW, 4);
         }
-    }
-
-    // Notifications: a bell with a clapper.
-    private function drawBellIcon(dc as Dc, cx as Number, cy as Number) as Void {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(cx, cy - 5, 1);          // top knob
-        dc.fillPolygon([
-            [cx - 5, cy + 3],
-            [cx + 5, cy + 3],
-            [cx + 3, cy - 3],
-            [cx - 3, cy - 3]
-        ] as Array<Graphics.Point2D>);         // bell body
-        dc.fillRectangle(cx - 6, cy + 3, 12, 1);   // rim
-        dc.fillCircle(cx, cy + 6, 1);          // clapper
-    }
-
-    // Alarm: a little clock face with hands and two feet.
-    private function drawAlarmIcon(dc as Dc, cx as Number, cy as Number) as Void {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(1);
-        dc.drawCircle(cx, cy, 5);
-        dc.drawLine(cx, cy, cx, cy - 3);       // minute hand
-        dc.drawLine(cx, cy, cx + 3, cy + 1);   // hour hand
-        dc.drawLine(cx - 4, cy - 5, cx - 6, cy - 7);   // left foot/ear
-        dc.drawLine(cx + 4, cy - 5, cx + 6, cy - 7);   // right foot/ear
-    }
-
-    // Bluetooth: the rune (spine + two crossing diagonals to the right humps).
-    private function drawBluetoothIcon(dc as Dc, cx as Number, cy as Number) as Void {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        dc.drawLine(cx, cy - 6, cx, cy + 6);       // spine
-        dc.drawLine(cx, cy - 6, cx + 4, cy - 2);   // top to upper-right hump
-        dc.drawLine(cx + 4, cy - 2, cx - 4, cy + 2);
-        dc.drawLine(cx - 4, cy - 2, cx + 4, cy + 2);
-        dc.drawLine(cx + 4, cy + 2, cx, cy + 6);   // lower-right hump to bottom
-        dc.setPenWidth(1);
     }
 
     function onHide() as Void {

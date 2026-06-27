@@ -2,4 +2,12 @@
 <drawables xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
     <!-- The icon shown in the watch's app/face list. -->
     <bitmap id="LauncherIcon" filename="launcher_icon.svg" dithering="none" />
+
+    <!-- Stat icons drawn on the face (monochrome SVGs rasterized to bitmaps). -->
+    <bitmap id="IconHeart" filename="ic_heart.svg" dithering="none" />
+    <bitmap id="IconSteps" filename="ic_steps.svg" dithering="none" />
+    <bitmap id="IconBody" filename="ic_body.svg" dithering="none" />
+    <bitmap id="IconBell" filename="ic_bell.svg" dithering="none" />
+    <bitmap id="IconAlarm" filename="ic_alarm.svg" dithering="none" />
+    <bitmap id="IconBluetooth" filename="ic_bluetooth.svg" dithering="none" />
 </drawables>
