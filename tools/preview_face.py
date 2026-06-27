@@ -25,9 +25,10 @@ WHITE = (255, 255, 255)
 CX = 88
 STAT_X_ICON = 22
 STAT_X_VAL = 42
-STAT_Y1 = 44      # steps
-STAT_Y2 = 70      # body battery
-TIME_Y = 106
+STAT_Y1 = 30      # steps (left)
+STAT_Y2 = 52      # body battery (left)
+STAT_Y3 = 74      # distance (left) — in line with the others
+TIME_Y = 108
 DATE_Y = 146
 STATUS_Y = 167
 # --------------------------------------------------------------------------------
@@ -69,7 +70,12 @@ def draw_text(canvas, font, x, y, s, justify="left"):
     atlas, common, chars = font
     line_h = common["lineHeight"]
     box_top = y - line_h / 2.0            # VCENTER: lineHeight box centered on y
-    pen = x - (text_width(chars, s) / 2.0 if justify == "center" else 0)
+    if justify == "center":
+        pen = x - text_width(chars, s) / 2.0
+    elif justify == "right":
+        pen = x - text_width(chars, s)
+    else:
+        pen = x
     for ch in s:
         c = chars.get(ord(ch))
         if c is None:
@@ -110,8 +116,11 @@ def main():
         img.paste(Image.new("RGB", heart.size, WHITE), (sx-7, sy-16), heart)
     draw_text(img, label, sx, sy + 8, "80", justify="center")
 
-    # Stats top-left (2 rows): icon + value.
-    for (y, icon, val) in [(STAT_Y1, "ic_steps.svg", "8,431"), (STAT_Y2, "ic_body.svg", "64%")]:
+    # Stats left column (3 rows): icon + value, all left-justified and in line.
+    rows = [(STAT_Y1, "ic_steps.svg", "8,431"),
+            (STAT_Y2, "ic_body.svg", "64%"),
+            (STAT_Y3, "ic_distance.svg", "3.21")]
+    for (y, icon, val) in rows:
         ic = load_icon(icon, 18)
         if ic:
             img.paste(Image.new("RGB", ic.size, WHITE), (STAT_X_ICON-9, y-9), ic)

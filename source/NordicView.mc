@@ -19,14 +19,16 @@ const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as Array<Str
 //      whitespace and alignment do the work, so there are no divider lines or
 //      decorations to crowd the type. ----
 
-// Top-left stat rows: a small icon + its value.
+// Left stat column: a small icon + its value, three rows in line (steps, body
+// battery, distance), starting high enough that all three clear the hero time.
 const STAT_X_ICON = 22;
 const STAT_X_VAL = 42;
-const STAT_Y_STEPS = 44;
-const STAT_Y_BODY = 70;
+const STAT_Y_STEPS = 30;
+const STAT_Y_BODY = 52;
+const STAT_Y_DIST = 74;
 
 // Hero time, date, and the bottom status row (all centered).
-const TIME_Y = 106;
+const TIME_Y = 108;
 const DATE_Y = 146;
 const STATUS_Y = 167;
 const STATUS_SLOT = 28;
@@ -56,6 +58,7 @@ class NordicView extends WatchUi.WatchFace {
     private var mIconBell as WatchUi.BitmapResource?;
     private var mIconAlarm as WatchUi.BitmapResource?;
     private var mIconBt as WatchUi.BitmapResource?;
+    private var mIconDistance as WatchUi.BitmapResource?;
 
     // Custom 1-bit bitmap fonts (resources/fonts). If a load ever fails these stay
     // null and the heroFont()/labelFont() helpers fall back to the system fonts, so
@@ -76,6 +79,7 @@ class NordicView extends WatchUi.WatchFace {
         mIconBell = WatchUi.loadResource(Rez.Drawables.IconBell) as WatchUi.BitmapResource;
         mIconAlarm = WatchUi.loadResource(Rez.Drawables.IconAlarm) as WatchUi.BitmapResource;
         mIconBt = WatchUi.loadResource(Rez.Drawables.IconBluetooth) as WatchUi.BitmapResource;
+        mIconDistance = WatchUi.loadResource(Rez.Drawables.IconDistance) as WatchUi.BitmapResource;
         mTimeFont = WatchUi.loadResource(Rez.Fonts.NordicHero) as WatchUi.FontResource;
         mLabelFont = WatchUi.loadResource(Rez.Fonts.NordicLabel) as WatchUi.FontResource;
     }
@@ -116,7 +120,7 @@ class NordicView extends WatchUi.WatchFace {
         var settings = System.getDeviceSettings();
 
         drawHeartCircle(dc);
-        drawStats(dc, info);
+        drawStats(dc, info, settings);
         drawBigTime(dc, cx, clockTime);
         drawDateLine(dc, cx);
         drawStatusIcons(dc, cx, settings);
@@ -148,9 +152,9 @@ class NordicView extends WatchUi.WatchFace {
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // Top-left stats: two icon + value rows — steps and Body Battery. Each value
-    // shows "--" when unavailable.
-    private function drawStats(dc as Dc, info as ActivityMonitor.Info?) as Void {
+    // Left stat column: three icon + value rows in line — steps, Body Battery, and
+    // distance. Each value shows "--" when unavailable.
+    private function drawStats(dc as Dc, info as ActivityMonitor.Info?, settings as System.DeviceSettings) as Void {
         // Steps.
         drawIcon(dc, mIconSteps, STAT_X_ICON, STAT_Y_STEPS);
         var s = (info == null) ? null : info.steps;
@@ -160,6 +164,11 @@ class NordicView extends WatchUi.WatchFace {
         drawIcon(dc, mIconBody, STAT_X_ICON, STAT_Y_BODY);
         var bb = mBodyBattery;
         drawValue(dc, STAT_X_VAL, STAT_Y_BODY, (bb == null) ? "--" : (bb.format("%d") + "%"));
+
+        // Distance today.
+        drawIcon(dc, mIconDistance, STAT_X_ICON, STAT_Y_DIST);
+        var d = (info == null) ? null : info.distance;
+        drawValue(dc, STAT_X_VAL, STAT_Y_DIST, formatDistance(d, settings));
     }
 
     private function drawValue(dc as Dc, x as Number, y as Number, text as String) as Void {
@@ -272,6 +281,18 @@ class NordicView extends WatchUi.WatchFace {
             }
         }
         return out;
+    }
+
+    // Today's distance (input in centimeters) as km or mi with 2 decimals, per the
+    // device's unit setting. "--" when unavailable.
+    private function formatDistance(cm as Number?, settings as System.DeviceSettings) as String {
+        if (cm == null) {
+            return "--";
+        }
+        if (settings.distanceUnits == System.UNIT_STATUTE) {
+            return (cm / 160934.4).format("%.2f");
+        }
+        return (cm / 100000.0).format("%.2f");
     }
 
     // ---- icons ---------------------------------------------------------------
