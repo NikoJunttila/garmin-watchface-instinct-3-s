@@ -14,15 +14,33 @@ import Toybox.WatchUi;
 // fixed table keeps the output deterministic and locale-independent.)
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as Array<String>;
 
-// "Nordic": a monochrome data face for the Instinct 3 Solar (176x176, 1-bit
-// black + white MIP, semi-octagon with a top-right circular sub-window).
+// ---- Layout geometry (px on the 176x176 panel). Single source of truth — tune
+//      here, not inside the draw methods. The face is deliberately minimal:
+//      whitespace and alignment do the work, so there are no divider lines or
+//      decorations to crowd the type. ----
+
+// Top-left stat rows: a small icon + its value.
+const STAT_X_ICON = 22;
+const STAT_X_VAL = 42;
+const STAT_Y_STEPS = 44;
+const STAT_Y_BODY = 70;
+
+// Hero time, date, and the bottom status row (all centered).
+const TIME_Y = 106;
+const DATE_Y = 146;
+const STATUS_Y = 167;
+const STATUS_SLOT = 28;
+
+// "Nordic": a clean, minimal monochrome data face for the Instinct 3 Solar
+// (176x176, 1-bit black + white MIP, semi-octagon with a top-right circular
+// sub-window). Typography-led — a big custom-font time is the hero, with a couple
+// of quiet stats and generous black space; no divider lines or accents.
 //
-// Layout, adapted from a Garmin reference to this hardware:
-//   - Left column: three icon+value rows  (steps / body battery / distance)
+// Layout:
+//   - Top-left: two icon+value rows  (steps / body battery)
 //   - Top-right circular sub-window: heart rate  (heart glyph + bpm)
-//   - Center-low: a big time  ("03:55") with the date beneath it  ("SAT 27.06")
+//   - Center: a big time  ("16:26"), with the date beneath it  ("SAT 27.06")
 //   - Bottom: a status-icon row  (battery, + notifications/alarm/bluetooth when active)
-//   - Thin white lines separate the sections, with accent ticks at 12 & 6 o'clock.
 class NordicView extends WatchUi.WatchFace {
 
     // SensorHistory (Body Battery) reads aren't free, and in high-power mode
@@ -31,20 +49,25 @@ class NordicView extends WatchUi.WatchFace {
     private var mCacheMin as Number = -1;
     private var mBodyBattery as Number? = null;
 
-    // Stat icons, loaded once from SVG drawables (see resources/drawables).
+    // Stat / status icons, loaded once from SVG drawables (see resources/drawables).
     private var mIconHeart as WatchUi.BitmapResource?;
     private var mIconSteps as WatchUi.BitmapResource?;
     private var mIconBody as WatchUi.BitmapResource?;
     private var mIconBell as WatchUi.BitmapResource?;
     private var mIconAlarm as WatchUi.BitmapResource?;
     private var mIconBt as WatchUi.BitmapResource?;
-    private var mIconDistance as WatchUi.BitmapResource?;
+
+    // Custom 1-bit bitmap fonts (resources/fonts). If a load ever fails these stay
+    // null and the heroFont()/labelFont() helpers fall back to the system fonts, so
+    // the face always renders.
+    private var mTimeFont as WatchUi.FontResource?;
+    private var mLabelFont as WatchUi.FontResource?;
 
     function initialize() {
         WatchFace.initialize();
     }
 
-    // Load the (empty) layout and the icon bitmaps once.
+    // Load the (empty) layout, the icon bitmaps, and the custom fonts once.
     function onLayout(dc as Dc) as Void {
         setLayout(Rez.Layouts.WatchFace(dc));
         mIconHeart = WatchUi.loadResource(Rez.Drawables.IconHeart) as WatchUi.BitmapResource;
@@ -53,10 +76,21 @@ class NordicView extends WatchUi.WatchFace {
         mIconBell = WatchUi.loadResource(Rez.Drawables.IconBell) as WatchUi.BitmapResource;
         mIconAlarm = WatchUi.loadResource(Rez.Drawables.IconAlarm) as WatchUi.BitmapResource;
         mIconBt = WatchUi.loadResource(Rez.Drawables.IconBluetooth) as WatchUi.BitmapResource;
-        mIconDistance = WatchUi.loadResource(Rez.Drawables.IconDistance) as WatchUi.BitmapResource;
+        mTimeFont = WatchUi.loadResource(Rez.Fonts.NordicHero) as WatchUi.FontResource;
+        mLabelFont = WatchUi.loadResource(Rez.Fonts.NordicLabel) as WatchUi.FontResource;
     }
 
     function onShow() as Void {
+    }
+
+    // The custom hero font, or the system number font if it failed to load.
+    private function heroFont() as Graphics.FontType {
+        return (mTimeFont != null) ? mTimeFont : Graphics.FONT_NUMBER_THAI_HOT;
+    }
+
+    // The custom label font, or the system FONT_XTINY if it failed to load.
+    private function labelFont() as Graphics.FontType {
+        return (mLabelFont != null) ? mLabelFont : Graphics.FONT_XTINY;
     }
 
     // Draw the whole face. A MIP display has no burn-in, so there's no separate
@@ -81,17 +115,8 @@ class NordicView extends WatchUi.WatchFace {
         var info = ActivityMonitor.getInfo();
         var settings = System.getDeviceSettings();
 
-        // ----- Section dividers + 12/6 o'clock accent ticks. -----
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        dc.drawLine(cx, 2, cx, 8);        // top tick
-        dc.drawLine(cx, 169, cx, 174);    // bottom tick
-        dc.drawLine(12, 88, 164, 88);     // above the time
-        dc.drawLine(12, 151, 164, 151);   // below the date
-        dc.setPenWidth(1);
-
         drawHeartCircle(dc);
-        drawLeftColumn(dc, info, settings);
+        drawStats(dc, info);
         drawBigTime(dc, cx, clockTime);
         drawDateLine(dc, cx);
         drawStatusIcons(dc, cx, settings);
@@ -119,44 +144,35 @@ class NordicView extends WatchUi.WatchFace {
         drawIcon(dc, mIconHeart, sx, sy - 9);
         var hr = getHeartRate();
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(sx, sy + 8, Graphics.FONT_XTINY, (hr == null) ? "--" : hr.format("%d"),
+        dc.drawText(sx, sy + 8, labelFont(), (hr == null) ? "--" : hr.format("%d"),
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // Left column: three rows, each an icon (left) + value (right): steps, Body
-    // Battery, then distance. Each value shows "--" when unavailable.
-    private function drawLeftColumn(dc as Dc, info as ActivityMonitor.Info?, settings as System.DeviceSettings) as Void {
-        var xIcon = 22;
-        var xVal = 38;
-
+    // Top-left stats: two icon + value rows — steps and Body Battery. Each value
+    // shows "--" when unavailable.
+    private function drawStats(dc as Dc, info as ActivityMonitor.Info?) as Void {
         // Steps.
-        drawIcon(dc, mIconSteps, xIcon, 36);
+        drawIcon(dc, mIconSteps, STAT_X_ICON, STAT_Y_STEPS);
         var s = (info == null) ? null : info.steps;
-        drawValue(dc, xVal, 36, groupThousands((s == null) ? 0 : s));
+        drawValue(dc, STAT_X_VAL, STAT_Y_STEPS, groupThousands((s == null) ? 0 : s));
 
-        // Body Battery (cached).
-        drawIcon(dc, mIconBody, xIcon, 57);
+        // Body Battery (cached), shown as a percentage.
+        drawIcon(dc, mIconBody, STAT_X_ICON, STAT_Y_BODY);
         var bb = mBodyBattery;
-        drawValue(dc, xVal, 57, (bb == null) ? "--" : bb.format("%d"));
-
-        // Distance today.
-        drawIcon(dc, mIconDistance, xIcon, 78);
-        var d = (info == null) ? null : info.distance;
-        drawValue(dc, xVal, 78, formatDistance(d, settings));
+        drawValue(dc, STAT_X_VAL, STAT_Y_BODY, (bb == null) ? "--" : (bb.format("%d") + "%"));
     }
 
     private function drawValue(dc as Dc, x as Number, y as Number, text as String) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x, y, Graphics.FONT_XTINY, text,
+        dc.drawText(x, y, labelFont(), text,
             Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // The hero: a big HH:MM, centered low on the face (the number font includes
-    // the ":" glyph).
+    // The hero: a big HH:MM, centered (the number font includes the ":" glyph).
     private function drawBigTime(dc as Dc, cx as Number, clockTime as System.ClockTime) as Void {
         var t = clockTime.hour.format("%02d") + ":" + clockTime.min.format("%02d");
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, 110, Graphics.FONT_NUMBER_THAI_HOT, t,
+        dc.drawText(cx, TIME_Y, heroFont(), t,
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
@@ -166,7 +182,7 @@ class NordicView extends WatchUi.WatchFace {
         var text = DAY_NAMES[info.day_of_week - 1] + " "
             + Lang.format("$1$.$2$", [info.day.format("%02d"), info.month.format("%02d")]);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, 140, Graphics.FONT_XTINY, text,
+        dc.drawText(cx, DATE_Y, labelFont(), text,
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
@@ -188,20 +204,18 @@ class NordicView extends WatchUi.WatchFace {
         }
 
         var n = icons.size();
-        var slot = 28;
-        var startC = cx - (n - 1) * slot / 2;
-        var y = 160;
+        var startC = cx - (n - 1) * STATUS_SLOT / 2;
         for (var i = 0; i < n; i += 1) {
-            var xc = startC + i * slot;
+            var xc = startC + i * STATUS_SLOT;
             var k = icons[i];
             if (k == :battery) {
-                drawBatteryIcon(dc, xc, y, System.getSystemStats().battery);
+                drawBatteryIcon(dc, xc, STATUS_Y, System.getSystemStats().battery);
             } else if (k == :bell) {
-                drawIcon(dc, mIconBell, xc, y);
+                drawIcon(dc, mIconBell, xc, STATUS_Y);
             } else if (k == :alarm) {
-                drawIcon(dc, mIconAlarm, xc, y);
+                drawIcon(dc, mIconAlarm, xc, STATUS_Y);
             } else {
-                drawIcon(dc, mIconBt, xc, y);
+                drawIcon(dc, mIconBt, xc, STATUS_Y);
             }
         }
     }
@@ -258,18 +272,6 @@ class NordicView extends WatchUi.WatchFace {
             }
         }
         return out;
-    }
-
-    // Today's distance (input in centimeters) as km or mi with 2 decimals, per
-    // the device's unit setting. "--" when unavailable.
-    private function formatDistance(cm as Number?, settings as System.DeviceSettings) as String {
-        if (cm == null) {
-            return "--";
-        }
-        if (settings.distanceUnits == System.UNIT_STATUTE) {
-            return (cm / 160934.4).format("%.2f");
-        }
-        return (cm / 100000.0).format("%.2f");
     }
 
     // ---- icons ---------------------------------------------------------------
