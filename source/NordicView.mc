@@ -18,9 +18,9 @@ const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as Array<Str
 // black + white MIP, semi-octagon with a top-right circular sub-window).
 //
 // Layout, adapted from a Garmin reference to this hardware:
-//   - Left column: three icon+value rows  (heart rate / steps / body battery)
-//   - Top-right circular sub-window: the date  ("SAT" over "10")
-//   - Center-low: a big split time  ("03  55")
+//   - Left column: three icon+value rows  (steps / body battery / distance)
+//   - Top-right circular sub-window: heart rate  (heart glyph + bpm)
+//   - Center-low: a big time  ("03:55") with the date beneath it  ("SAT 27.06")
 //   - Bottom: a status-icon row  (battery, + notifications/alarm/bluetooth when active)
 //   - Thin white lines separate the sections, with accent ticks at 12 & 6 o'clock.
 class NordicView extends WatchUi.WatchFace {
@@ -38,6 +38,7 @@ class NordicView extends WatchUi.WatchFace {
     private var mIconBell as WatchUi.BitmapResource?;
     private var mIconAlarm as WatchUi.BitmapResource?;
     private var mIconBt as WatchUi.BitmapResource?;
+    private var mIconDistance as WatchUi.BitmapResource?;
 
     function initialize() {
         WatchFace.initialize();
@@ -52,6 +53,7 @@ class NordicView extends WatchUi.WatchFace {
         mIconBell = WatchUi.loadResource(Rez.Drawables.IconBell) as WatchUi.BitmapResource;
         mIconAlarm = WatchUi.loadResource(Rez.Drawables.IconAlarm) as WatchUi.BitmapResource;
         mIconBt = WatchUi.loadResource(Rez.Drawables.IconBluetooth) as WatchUi.BitmapResource;
+        mIconDistance = WatchUi.loadResource(Rez.Drawables.IconDistance) as WatchUi.BitmapResource;
     }
 
     function onShow() as Void {
@@ -84,12 +86,12 @@ class NordicView extends WatchUi.WatchFace {
         dc.setPenWidth(2);
         dc.drawLine(cx, 2, cx, 8);        // top tick
         dc.drawLine(cx, 169, cx, 174);    // bottom tick
-        dc.drawLine(12, 85, 164, 85);     // above the time
+        dc.drawLine(12, 88, 164, 88);     // above the time
         dc.drawLine(12, 151, 164, 151);   // below the date
         dc.setPenWidth(1);
 
         drawHeartCircle(dc);
-        drawLeftColumn(dc, info);
+        drawLeftColumn(dc, info, settings);
         drawBigTime(dc, cx, clockTime);
         drawDateLine(dc, cx);
         drawStatusIcons(dc, cx, settings);
@@ -121,21 +123,26 @@ class NordicView extends WatchUi.WatchFace {
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // Left column: two rows, each an icon (left) + value (right): steps, then
-    // Body Battery. Each value shows "--" when unavailable.
-    private function drawLeftColumn(dc as Dc, info as ActivityMonitor.Info?) as Void {
+    // Left column: three rows, each an icon (left) + value (right): steps, Body
+    // Battery, then distance. Each value shows "--" when unavailable.
+    private function drawLeftColumn(dc as Dc, info as ActivityMonitor.Info?, settings as System.DeviceSettings) as Void {
         var xIcon = 22;
         var xVal = 38;
 
         // Steps.
-        drawIcon(dc, mIconSteps, xIcon, 50);
+        drawIcon(dc, mIconSteps, xIcon, 36);
         var s = (info == null) ? null : info.steps;
-        drawValue(dc, xVal, 50, groupThousands((s == null) ? 0 : s));
+        drawValue(dc, xVal, 36, groupThousands((s == null) ? 0 : s));
 
         // Body Battery (cached).
-        drawIcon(dc, mIconBody, xIcon, 73);
+        drawIcon(dc, mIconBody, xIcon, 57);
         var bb = mBodyBattery;
-        drawValue(dc, xVal, 73, (bb == null) ? "--" : bb.format("%d"));
+        drawValue(dc, xVal, 57, (bb == null) ? "--" : bb.format("%d"));
+
+        // Distance today.
+        drawIcon(dc, mIconDistance, xIcon, 78);
+        var d = (info == null) ? null : info.distance;
+        drawValue(dc, xVal, 78, formatDistance(d, settings));
     }
 
     private function drawValue(dc as Dc, x as Number, y as Number, text as String) as Void {
@@ -144,17 +151,13 @@ class NordicView extends WatchUi.WatchFace {
             Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // The hero: a big time split into two halves with a center gap (no colon),
-    // e.g. "03  55", centered low on the face.
+    // The hero: a big HH:MM, centered low on the face (the number font includes
+    // the ":" glyph).
     private function drawBigTime(dc as Dc, cx as Number, clockTime as System.ClockTime) as Void {
-        var hh = clockTime.hour.format("%02d");
-        var mm = clockTime.min.format("%02d");
-        var font = Graphics.FONT_NUMBER_THAI_HOT;
+        var t = clockTime.hour.format("%02d") + ":" + clockTime.min.format("%02d");
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx - 10, 109, font, hh,
-            Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.drawText(cx + 10, 109, font, mm,
-            Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(cx, 110, Graphics.FONT_NUMBER_THAI_HOT, t,
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     // The date directly below the time, in a small font (e.g. "SAT 27.06").
@@ -255,6 +258,18 @@ class NordicView extends WatchUi.WatchFace {
             }
         }
         return out;
+    }
+
+    // Today's distance (input in centimeters) as km or mi with 2 decimals, per
+    // the device's unit setting. "--" when unavailable.
+    private function formatDistance(cm as Number?, settings as System.DeviceSettings) as String {
+        if (cm == null) {
+            return "--";
+        }
+        if (settings.distanceUnits == System.UNIT_STATUTE) {
+            return (cm / 160934.4).format("%.2f");
+        }
+        return (cm / 100000.0).format("%.2f");
     }
 
     // ---- icons ---------------------------------------------------------------

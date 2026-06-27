@@ -7,6 +7,7 @@
     <bitmap id="IconHeart" filename="ic_heart.svg" dithering="none" />
     <bitmap id="IconSteps" filename="ic_steps.svg" dithering="none" />
     <bitmap id="IconBody" filename="ic_body.svg" dithering="none" />
+    <bitmap id="IconDistance" filename="ic_distance.svg" dithering="none" />
     <bitmap id="IconBell" filename="ic_bell.svg" dithering="none" />
     <bitmap id="IconAlarm" filename="ic_alarm.svg" dithering="none" />
     <bitmap id="IconBluetooth" filename="ic_bluetooth.svg" dithering="none" />
