@@ -20,6 +20,7 @@ DRAW = os.path.join(ROOT, "resources", "drawables")
 S = 176
 SC = 4
 WHITE = (255, 255, 255)
+GREY = (70, 70, 70)   # reference-only (e.g. the physical sub-window bezel); not drawn by the face
 
 # ---- LAYOUT (mirror of the constants in NordicView.mc) -------------------------
 CX = 88
@@ -109,9 +110,10 @@ def main():
     img = Image.new("RGB", (S, S), (0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    # HR sub-window (top-right), plain ring + heart + bpm. (+2px nudge = HR_DX.)
-    sx, sy, sr = 146, 31, 31
-    d.ellipse([sx-(sr-1), sy-(sr-1), sx+(sr-1), sy+(sr-1)], outline=WHITE, width=2)
+    # HR sub-window (top-right): heart + bpm only, no drawn ring. The gray circle is
+    # just a REFERENCE for the physical window bezel (not drawn by the face).
+    sx, sy, sr = 145, 31, 31   # 144 + HR_DX(1)
+    d.ellipse([sx-sr, sy-sr, sx+sr, sy+sr], outline=GREY, width=1)
     heart = load_icon("ic_heart.svg", 14)
     if heart:
         img.paste(Image.new("RGB", heart.size, WHITE), (sx-7, sy-16), heart)

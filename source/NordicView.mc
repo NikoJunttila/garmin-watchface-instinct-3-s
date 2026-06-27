@@ -27,9 +27,9 @@ const STAT_Y_STEPS = 30;
 const STAT_Y_BODY = 52;
 const STAT_Y_DIST = 74;
 
-// Heart-rate sub-window: nudge the drawn ring + contents right by this many px so
-// they sit centered in the physical sub-window on the device (tune if needed).
-const HR_DX = 2;
+// Heart-rate sub-window: nudge the heart + bpm right by this many px to center them
+// in the physical sub-window on the device (tune if needed).
+const HR_DX = 1;
 
 // Hero time, date, and the bottom status row (all centered).
 const TIME_Y = 108;
@@ -135,32 +135,27 @@ class NordicView extends WatchUi.WatchFace {
         var info = ActivityMonitor.getInfo();
         var settings = System.getDeviceSettings();
 
-        drawHeartCircle(dc);
+        drawHeartRate(dc);
         drawStats(dc, info, settings);
         drawBigTime(dc, cx, clockTime);
         drawDateLine(dc, cx);
         drawStatusIcons(dc, cx, settings);
     }
 
-    // Heart rate in the top-right circular sub-window: a white ring, a heart
-    // glyph, and the bpm number (or "--"). Geometry comes from WatchUi.getSubscreen()
-    // so it lands exactly in the hardware window; falls back to known coordinates.
-    private function drawHeartCircle(dc as Dc) as Void {
-        var sx; var sy; var sr;
+    // Heart rate in the top-right sub-window: a heart glyph + the bpm number (or
+    // "--"). No drawn ring — the window's own hardware bezel frames it, so there's
+    // nothing to misalign. Geometry comes from WatchUi.getSubscreen() (fallback to
+    // known coordinates).
+    private function drawHeartRate(dc as Dc) as Void {
+        var sx; var sy;
         var sub = WatchUi.getSubscreen();
         if (sub != null) {
             sx = sub.x + sub.width / 2;
             sy = sub.y + sub.height / 2;
-            sr = sub.width / 2;
         } else {
-            sx = 144; sy = 31; sr = 31;
+            sx = 144; sy = 31;
         }
-        sx += HR_DX;  // nudge the whole group to center it in the physical window
-
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        dc.drawCircle(sx, sy, sr - 1);
-        dc.setPenWidth(1);
+        sx += HR_DX;  // nudge the heart+bpm to center them in the physical window
 
         drawIcon(dc, mIconHeart, sx, sy - 9);
         var hr = getHeartRate();
