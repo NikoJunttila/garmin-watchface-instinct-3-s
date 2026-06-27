@@ -27,11 +27,20 @@ const STAT_Y_STEPS = 30;
 const STAT_Y_BODY = 52;
 const STAT_Y_DIST = 74;
 
+// Heart-rate sub-window: nudge the drawn ring + contents right by this many px so
+// they sit centered in the physical sub-window on the device (tune if needed).
+const HR_DX = 2;
+
 // Hero time, date, and the bottom status row (all centered).
 const TIME_Y = 108;
 const DATE_Y = 146;
 const STATUS_Y = 167;
-const STATUS_SLOT = 28;
+// Bottom status row = battery cell + "NN%", then any active bell/alarm/bt icons,
+// centered as a group by measured width.
+const BATTERY_W = 16;        // width of the drawn battery cell
+const STATUS_GAP_PCT = 4;    // gap between the battery cell and its percentage
+const STATUS_GAP_ICON = 10;  // gap before each trailing status icon
+const STATUS_ICON_W = 18;    // width of a status icon
 
 // "Nordic": a clean, minimal monochrome data face for the Instinct 3 Solar
 // (176x176, 1-bit black + white MIP, semi-octagon with a top-right circular
@@ -65,6 +74,7 @@ class NordicView extends WatchUi.WatchFace {
     // the face always renders.
     private var mTimeFont as WatchUi.FontResource?;
     private var mLabelFont as WatchUi.FontResource?;
+    private var mSmallFont as WatchUi.FontResource?;
 
     function initialize() {
         WatchFace.initialize();
@@ -82,6 +92,7 @@ class NordicView extends WatchUi.WatchFace {
         mIconDistance = WatchUi.loadResource(Rez.Drawables.IconDistance) as WatchUi.BitmapResource;
         mTimeFont = WatchUi.loadResource(Rez.Fonts.NordicHero) as WatchUi.FontResource;
         mLabelFont = WatchUi.loadResource(Rez.Fonts.NordicLabel) as WatchUi.FontResource;
+        mSmallFont = WatchUi.loadResource(Rez.Fonts.NordicSmall) as WatchUi.FontResource;
     }
 
     function onShow() as Void {
@@ -95,6 +106,11 @@ class NordicView extends WatchUi.WatchFace {
     // The custom label font, or the system FONT_XTINY if it failed to load.
     private function labelFont() as Graphics.FontType {
         return (mLabelFont != null) ? mLabelFont : Graphics.FONT_XTINY;
+    }
+
+    // The small custom font (battery %), or the system FONT_XTINY if it failed.
+    private function smallFont() as Graphics.FontType {
+        return (mSmallFont != null) ? mSmallFont : Graphics.FONT_XTINY;
     }
 
     // Draw the whole face. A MIP display has no burn-in, so there's no separate
@@ -139,6 +155,7 @@ class NordicView extends WatchUi.WatchFace {
         } else {
             sx = 144; sy = 31; sr = 31;
         }
+        sx += HR_DX;  // nudge the whole group to center it in the physical window
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(2);
@@ -195,37 +212,52 @@ class NordicView extends WatchUi.WatchFace {
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // Bottom status row: the watch battery is always shown; notifications, alarm,
-    // and Bluetooth appear only when active. The shown icons are centered together.
+    // Bottom status row: the watch battery (cell + "NN%") is always shown;
+    // notifications, alarm, and Bluetooth icons follow only when active. The whole
+    // group is centered by its measured width so the battery percentage fits.
     private function drawStatusIcons(dc as Dc, cx as Number, settings as System.DeviceSettings) as Void {
-        var icons = [:battery] as Array<Symbol>;
+        // Battery element: the drawn cell + its percentage text.
+        var pct = System.getSystemStats().battery;
+        var pctText = pct.toNumber().format("%d") + "%";
+        var pctW = dc.getTextWidthInPixels(pctText, smallFont());
+        var batteryW = BATTERY_W + STATUS_GAP_PCT + pctW;
 
+        // Trailing status icons (only when active). notificationCount is Garmin's
+        // active/unread count, so the bell already shows only for unread.
+        var extras = [] as Array<Symbol>;
         var notif = settings.notificationCount;
         if (notif != null && notif > 0) {
-            icons.add(:bell);
+            extras.add(:bell);
         }
         var alarms = settings.alarmCount;
         if (alarms != null && alarms > 0) {
-            icons.add(:alarm);
+            extras.add(:alarm);
         }
         if (settings.phoneConnected) {
-            icons.add(:bluetooth);
+            extras.add(:bluetooth);
         }
 
-        var n = icons.size();
-        var startC = cx - (n - 1) * STATUS_SLOT / 2;
-        for (var i = 0; i < n; i += 1) {
-            var xc = startC + i * STATUS_SLOT;
-            var k = icons[i];
-            if (k == :battery) {
-                drawBatteryIcon(dc, xc, STATUS_Y, System.getSystemStats().battery);
-            } else if (k == :bell) {
-                drawIcon(dc, mIconBell, xc, STATUS_Y);
+        // Center the whole [battery + %] [icons...] group.
+        var totalW = batteryW + extras.size() * (STATUS_GAP_ICON + STATUS_ICON_W);
+        var x = cx - totalW / 2;
+
+        drawBatteryIcon(dc, x + BATTERY_W / 2, STATUS_Y, pct);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + BATTERY_W + STATUS_GAP_PCT, STATUS_Y, smallFont(), pctText,
+            Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        x += batteryW;
+
+        for (var i = 0; i < extras.size(); i += 1) {
+            x += STATUS_GAP_ICON;
+            var k = extras[i];
+            if (k == :bell) {
+                drawIcon(dc, mIconBell, x + STATUS_ICON_W / 2, STATUS_Y);
             } else if (k == :alarm) {
-                drawIcon(dc, mIconAlarm, xc, STATUS_Y);
+                drawIcon(dc, mIconAlarm, x + STATUS_ICON_W / 2, STATUS_Y);
             } else {
-                drawIcon(dc, mIconBt, xc, STATUS_Y);
+                drawIcon(dc, mIconBt, x + STATUS_ICON_W / 2, STATUS_Y);
             }
+            x += STATUS_ICON_W;
         }
     }
 

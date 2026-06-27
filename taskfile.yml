@@ -28,10 +28,11 @@ tasks:
     cmds:
       - python3 tools/genfont.py --ttf {{.HERO_TTF}}  --size 56 --chars "0123456789:" --out resources/fonts/nordic_hero --threshold 128 --mono-digits --colon-rise 4
       - python3 tools/genfont.py --ttf {{.LABEL_TTF}} --size 24 --chars "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ .,:%-/" --out resources/fonts/nordic_label --threshold 104
+      - python3 tools/genfont.py --ttf {{.LABEL_TTF}} --size 14 --chars "0123456789%" --out resources/fonts/nordic_small --threshold 100
 
   build:
     desc: Compile the watch face into bin/{{.NAME}}.prg
-    deps: [key]
+    deps: [key, clean]
     cmds:
       - mkdir -p bin
       - '{{.SDK}}/bin/monkeyc -d {{.DEVICE}} -f monkey.jungle -o bin/{{.NAME}}.prg -y developer_key.der -w'

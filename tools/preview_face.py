@@ -104,12 +104,13 @@ def load_icon(name, size=18):
 def main():
     hero = parse_fnt("nordic_hero")
     label = parse_fnt("nordic_label")
+    small = parse_fnt("nordic_small")
 
     img = Image.new("RGB", (S, S), (0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    # HR sub-window (top-right), plain ring + heart + bpm.
-    sx, sy, sr = 144, 31, 31
+    # HR sub-window (top-right), plain ring + heart + bpm. (+2px nudge = HR_DX.)
+    sx, sy, sr = 146, 31, 31
     d.ellipse([sx-(sr-1), sy-(sr-1), sx+(sr-1), sy+(sr-1)], outline=WHITE, width=2)
     heart = load_icon("ic_heart.svg", 14)
     if heart:
@@ -132,9 +133,27 @@ def main():
     draw_text(img, hero, CX, TIME_Y, "16:26", justify="center")
     draw_text(img, label, CX, DATE_Y, "SAT 27.06", justify="center")
 
-    # Battery (centered) + sample status icons.
-    d.rectangle([CX-9, STATUS_Y-4, CX+5, STATUS_Y+4], outline=WHITE)
-    d.rectangle([CX+5, STATUS_Y-2, CX+7, STATUS_Y+2], fill=WHITE)
+    # Bottom status row: battery cell + "NN%", then sample icons, centered by width.
+    BATTERY_W, GAP_PCT, GAP_ICON, ICON_W = 16, 4, 10, 18
+    pct, pct_text = 85, "85%"
+    pct_w = text_width(small[2], pct_text)
+    extras = ["ic_bluetooth.svg"]   # sample active icon
+    total = BATTERY_W + GAP_PCT + pct_w + len(extras) * (GAP_ICON + ICON_W)
+    x = CX - total / 2
+    bx = x + BATTERY_W / 2           # battery cell center
+    d.rectangle([bx-8, STATUS_Y-4, bx+6, STATUS_Y+4], outline=WHITE)   # body
+    d.rectangle([bx+6, STATUS_Y-2, bx+8, STATUS_Y+2], fill=WHITE)      # nub
+    fw = int(10 * pct / 100)
+    if fw > 0:
+        d.rectangle([bx-6, STATUS_Y-2, bx-6+fw, STATUS_Y+2], fill=WHITE)  # fill
+    draw_text(img, small, x + BATTERY_W + GAP_PCT, STATUS_Y, pct_text, justify="left")
+    x += BATTERY_W + GAP_PCT + pct_w
+    for e in extras:
+        x += GAP_ICON
+        ic = load_icon(e, ICON_W)
+        if ic:
+            img.paste(Image.new("RGB", ic.size, WHITE), (int(x + ICON_W/2 - 9), STATUS_Y - 9), ic)
+        x += ICON_W
 
     img.resize((S*SC, S*SC), Image.NEAREST).save("/tmp/nordic_preview.png")
     print("wrote /tmp/nordic_preview.png  (layout: TIME_Y=%d DATE_Y=%d stats=%d,%d)"

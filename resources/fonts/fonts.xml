@@ -8,4 +8,7 @@
 
     <!-- Labels/values/date: digits, A-Z, and the punctuation the face emits. -->
     <font id="NordicLabel" filename="nordic_label.fnt" antialias="false" filter="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ .,:%-/" />
+
+    <!-- Small font for the battery percentage in the bottom status row. -->
+    <font id="NordicSmall" filename="nordic_small.fnt" antialias="false" filter="0123456789%" />
 </fonts>
