@@ -5,7 +5,7 @@
         id="33e41ff8b61548ad8ccda78c6d8182a0"
         type="watchface"
         name="@Strings.AppName"
-        entry="HelloGarminApp"
+        entry="NordicApp"
         launcherIcon="@Drawables.LauncherIcon"
         minApiLevel="6.0.0">
 

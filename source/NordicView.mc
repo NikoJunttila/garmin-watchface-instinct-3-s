@@ -25,7 +25,7 @@ const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as Array<Str
 //        8:25             (big time, center)
 //   STEPS  BODY  BATT     (a divided 3-column stat row)
 //   8,431   62    87%
-class HelloGarminView extends WatchUi.WatchFace {
+class NordicView extends WatchUi.WatchFace {
 
     // SensorHistory (Body Battery) reads aren't free, and in high-power mode
     // onUpdate fires up to 60x/min. Cache the value and refresh it only when the
@@ -66,11 +66,6 @@ class HelloGarminView extends WatchUi.WatchFace {
         }
 
         var info = ActivityMonitor.getInfo();
-
-        // ----- Brand, top center. -----
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, 10, Graphics.FONT_XTINY, "GARMIN",
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // ----- Date, top-left (e.g. "SAT 27.06"). -----
         drawDate(dc);
@@ -130,7 +125,7 @@ class HelloGarminView extends WatchUi.WatchFace {
     }
 
     // The bottom stat bar: a top divider line, two vertical separators, and three
-    // columns (steps / body battery / battery %), each a small label over a value.
+    // columns (steps / body battery / battery %), each an icon over a value.
     private function drawStatRow(dc as Dc, info as ActivityMonitor.Info?) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(2);
@@ -151,18 +146,62 @@ class HelloGarminView extends WatchUi.WatchFace {
         var battery = System.getSystemStats().battery;
         var battText = (battery + 0.5).toNumber().format("%d") + "%";
 
-        drawStatCell(dc, 40, "STEPS", stepsText);
-        drawStatCell(dc, 88, "BODY", bodyText);
-        drawStatCell(dc, 136, "BATT", battText);
+        var iconY = 125;
+        drawStepsIcon(dc, 40, iconY);
+        drawBodyIcon(dc, 88, iconY);
+        drawBatteryIcon(dc, 136, iconY, battery);
+
+        var valueY = 143;
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(40, valueY, Graphics.FONT_XTINY, stepsText,
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(88, valueY, Graphics.FONT_XTINY, bodyText,
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(136, valueY, Graphics.FONT_XTINY, battText,
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // One stat column: a label row above a value row, both centered on colX.
-    private function drawStatCell(dc as Dc, colX as Number, label as String, value as String) as Void {
+    // ---- stat icons (all white, centered at (cx, cy), ~16px tall) -------------
+
+    // Steps: a single footprint — toe dots above a ball + heel sole.
+    private function drawStepsIcon(dc as Dc, cx as Number, cy as Number) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(colX, 126, Graphics.FONT_XTINY, label,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.drawText(colX, 141, Graphics.FONT_XTINY, value,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.fillCircle(cx - 3, cy - 6, 1);
+        dc.fillCircle(cx - 1, cy - 7, 1);
+        dc.fillCircle(cx + 1, cy - 7, 1);
+        dc.fillCircle(cx + 3, cy - 6, 1);
+        dc.fillCircle(cx, cy - 1, 4);          // ball of the foot
+        dc.fillCircle(cx - 1, cy + 5, 3);      // heel
+        dc.fillPolygon([
+            [cx - 4, cy - 1],
+            [cx + 4, cy - 1],
+            [cx + 2, cy + 5],
+            [cx - 4, cy + 5]
+        ] as Array<Graphics.Point2D>);         // arch joining ball to heel
+    }
+
+    // Body Battery: a person silhouette (head + torso) — "your body's" energy.
+    private function drawBodyIcon(dc as Dc, cx as Number, cy as Number) as Void {
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(cx, cy - 5, 3);          // head
+        dc.fillPolygon([
+            [cx - 5, cy + 6],
+            [cx + 5, cy + 6],
+            [cx + 3, cy - 2],
+            [cx - 3, cy - 2]
+        ] as Array<Graphics.Point2D>);         // shoulders / torso
+    }
+
+    // Watch battery: an outlined cell + terminal nub + a charge-level fill.
+    private function drawBatteryIcon(dc as Dc, cx as Number, cy as Number, pct as Float) as Void {
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(1);
+        dc.drawRectangle(cx - 8, cy - 4, 14, 8);   // body
+        dc.fillRectangle(cx + 6, cy - 2, 2, 4);    // terminal nub
+        var fillW = (10 * pct / 100.0).toNumber();
+        if (fillW > 0) {
+            dc.fillRectangle(cx - 6, cy - 2, fillW, 4);
+        }
     }
 
     // ---- data getters (all null-safe) ----------------------------------------

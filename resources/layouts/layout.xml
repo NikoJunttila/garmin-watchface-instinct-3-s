@@ -1,4 +1,4 @@
-<!-- The face is drawn entirely in code (HelloGarminView.onUpdate), so this
+<!-- The face is drawn entirely in code (NordicView.onUpdate), so this
      layout is intentionally empty — it just gives onLayout() something to load. -->
 <layout id="WatchFace" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
 </layout>
