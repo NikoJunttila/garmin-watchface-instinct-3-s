@@ -9,15 +9,15 @@
         launcherIcon="@Drawables.LauncherIcon"
         minApiLevel="6.0.0">
 
-        <!-- Watches this builds for. -->
+        <!-- Watches this builds for. The Instinct 3 Solar (176x176, 1-bit MIP,
+             semi-octagon). The single 45mm product id covers both 45mm and 50mm. -->
         <iq:products>
-            <iq:product id="instinct3amoled45mm"/>
-            <iq:product id="instinct3amoled50mm"/>
+            <iq:product id="instinct3solar45mm"/>
         </iq:products>
 
         <!-- System permissions. SensorHistory is required to read Body Battery
-             (SensorHistory.getBodyBatteryHistory). Everything else the face shows
-             — stress, intensity minutes, weather, sunrise/sunset — needs none. -->
+             (SensorHistory.getBodyBatteryHistory). The other stats shown —
+             steps, heart rate, battery — need no permission. -->
         <iq:permissions>
             <iq:uses-permission id="SensorHistory"/>
         </iq:permissions>

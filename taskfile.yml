@@ -2,7 +2,7 @@ version: '3'
 
 vars:
   SDK: '{{.HOME}}/.Garmin/ConnectIQ/Sdks/connectiq-sdk-lin-9.2.0-2026-06-09-92a1605b2'
-  DEVICE: instinct3amoled45mm   # also try: instinct3amoled50mm
+  DEVICE: instinct3solar45mm
   NAME: HelloGarmin
 
 tasks:
