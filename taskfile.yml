@@ -56,3 +56,12 @@ tasks:
     desc: Remove build output
     cmds:
       - rm -rf bin
+
+  package:
+    desc: Export bin/{{.NAME}}.iq for sharing/publishing on the Connect IQ Store
+    deps: [key, clean]
+    cmds:
+      - mkdir -p bin
+      # -e packages a release build for every product in manifest.xml (no -d).
+      - '{{.SDK}}/bin/monkeyc -e -f monkey.jungle -o bin/{{.NAME}}.iq -y developer_key.der -r -w'
+
