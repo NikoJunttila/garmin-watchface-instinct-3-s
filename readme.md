@@ -2,7 +2,14 @@
 
 A Connect IQ watch face (Monkey C) for the **Garmin Instinct 3 Solar**, designed for
 its 1-bit **black-&-white** MIP display. Everything is white on black — no color, since
-the panel only has two colors. Layout:
+the panel only has two colors.
+
+Layout:
+
+- **Top-left** — three icon+value rows: steps / body battery / distance
+- **Top-right sub-window** — heart rate (heart glyph + bpm)
+- **Center** — a big time ("16:26") with the date directly beneath it ("SAT 27.06")
+- **Bottom** — a status row: battery, plus notifications / alarm / Bluetooth when active
 
 Built only for the **Instinct 3 Solar 45mm** (`instinct3solar45mm`, 176×176, semi-octagon).
 That one product id also covers the 50mm hardware. Uses the Garmin SDK loaded via
@@ -12,8 +19,9 @@ That one product id also covers the 50mm hardware. Uses the Garmin SDK loaded vi
 
 The Instinct 3 Solar is a transflective MIP panel: **2-color (black + white) only**, no
 grays, no anti-aliasing, no alpha blending, and no burn-in. So the face leans on bold
-shapes, hand-drawn icons, and ≥2px strokes for legibility, and there's no separate
-dimmed always-on mode (a MIP screen is always on and never burns in).
+shapes, monochrome SVG icons (rasterized to 1-bit bitmaps), and ≥2px strokes for
+legibility, and there's no separate dimmed always-on mode (a MIP screen is always on
+and never burns in).
 
 ## Build & run
 

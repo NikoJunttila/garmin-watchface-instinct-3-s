@@ -9,9 +9,10 @@ import Toybox.Time.Gregorian;
 import Toybox.WatchUi;
 
 // Abbreviated day names, indexed by (day_of_week - 1). Gregorian.info() with
-// FORMAT_SHORT returns day_of_week as 1=Sunday .. 7=Saturday. (We map it
-// ourselves because FORMAT_MEDIUM/LONG only return abbreviations anyway, and a
-// fixed table keeps the output deterministic and locale-independent.)
+// FORMAT_SHORT returns day_of_week as a number 1=Sunday .. 7=Saturday, which is
+// guaranteed in range, so the -1 index is always safe. We keep a fixed English
+// table (rather than FORMAT_MEDIUM's localized strings) to stay deterministic and
+// locale-independent.
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as Array<String>;
 
 // ---- Layout geometry (px on the 176x176 panel). Single source of truth — tune
@@ -27,8 +28,11 @@ const STAT_Y_STEPS = 30;
 const STAT_Y_BODY = 52;
 const STAT_Y_DIST = 74;
 
-// Heart-rate sub-window: nudge the heart + bpm right by this many px to center them
-// in the physical sub-window on the device (tune if needed).
+// Heart-rate sub-window. When WatchUi.getSubscreen() returns null we fall back to
+// the known sub-window center on the Instinct 3 Solar; HR_DX nudges the heart + bpm
+// right so they center in the physical window on the device (tune if needed).
+const HR_FALLBACK_X = 144;
+const HR_FALLBACK_Y = 31;
 const HR_DX = 1;
 
 // Hero time, date, and the bottom status row (all centered).
@@ -37,7 +41,9 @@ const DATE_Y = 146;
 const STATUS_Y = 167;
 // Bottom status row = battery cell + "NN%", then any active bell/alarm/bt icons,
 // centered as a group by measured width.
-const BATTERY_W = 16;        // width of the drawn battery cell
+const BATTERY_W = 16;        // total drawn width of the battery cell (body + nub)
+const BATTERY_H = 8;         // height of the battery cell
+const BATTERY_NUB_W = 2;     // terminal nub width (included in BATTERY_W)
 const STATUS_GAP_PCT = 4;    // gap between the battery cell and its percentage
 const STATUS_GAP_ICON = 10;  // gap before each trailing status icon
 const STATUS_ICON_W = 18;    // width of a status icon
@@ -48,17 +54,36 @@ const STATUS_ICON_W = 18;    // width of a status icon
 // of quiet stats and generous black space; no divider lines or accents.
 //
 // Layout:
-//   - Top-left: two icon+value rows  (steps / body battery)
+//   - Top-left: three icon+value rows  (steps / body battery / distance)
 //   - Top-right circular sub-window: heart rate  (heart glyph + bpm)
 //   - Center: a big time  ("16:26"), with the date beneath it  ("SAT 27.06")
 //   - Bottom: a status-icon row  (battery, + notifications/alarm/bluetooth when active)
 class NordicView extends WatchUi.WatchFace {
 
-    // SensorHistory (Body Battery) reads aren't free, and in high-power mode
-    // onUpdate fires up to 60x/min. Cache the value and refresh it only when the
-    // clock minute changes.
+    // ---- per-minute cache ----------------------------------------------------
+    // The face shows no seconds, so every displayed value changes at most once a
+    // minute. In high-power mode (after a wrist raise) onUpdate fires up to ~60x/min,
+    // so we read sensors/settings and build every display string ONCE when the clock
+    // minute changes (refreshCache), then the draw methods just blit the cached
+    // strings. The only live read is the in-activity heart rate (see currentHeartRate).
     private var mCacheMin as Number = -1;
-    private var mBodyBattery as Number? = null;
+
+    private var mBodyBattery as Number? = null;  // newest Body Battery sample (cached)
+    private var mHrHistory as Number? = null;     // newest all-day HR sample (cached fallback)
+
+    private var mTimeText as String = "";
+    private var mDateText as String = "";
+    private var mStepsText as String = "";
+    private var mBodyText as String = "";
+    private var mDistText as String = "";
+
+    private var mBattPct as Float = 0.0;
+    private var mBattText as String = "";
+    private var mBattTextW as Number = 0;
+
+    private var mShowBell as Boolean = false;
+    private var mShowAlarm as Boolean = false;
+    private var mShowBt as Boolean = false;
 
     // Stat / status icons, loaded once from SVG drawables (see resources/drawables).
     private var mIconHeart as WatchUi.BitmapResource?;
@@ -95,7 +120,11 @@ class NordicView extends WatchUi.WatchFace {
         mSmallFont = WatchUi.loadResource(Rez.Fonts.NordicSmall) as WatchUi.FontResource;
     }
 
+    // Force a cache refresh on the next draw whenever the face becomes visible, so a
+    // change made while we were hidden (e.g. the user toggling 12/24h in settings)
+    // is picked up immediately rather than up to a minute later.
     function onShow() as Void {
+        mCacheMin = -1;
     }
 
     // The custom hero font, or the system number font if it failed to load.
@@ -114,32 +143,80 @@ class NordicView extends WatchUi.WatchFace {
     }
 
     // Draw the whole face. A MIP display has no burn-in, so there's no separate
-    // dimmed always-on face — we always draw the full layout. With no seconds
-    // shown, the system's once-per-minute updates in low power cover it.
+    // dimmed always-on face — we always draw the full layout. With no seconds shown,
+    // the system's once-per-minute updates in low power cover it, and the per-minute
+    // cache keeps the high-power burst cheap.
     function onUpdate(dc as Dc) as Void {
-        var width = dc.getWidth();
-        var cx = width / 2;
-
-        // Background.
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.clear();
-
         var clockTime = System.getClockTime();
 
-        // Refresh the cached Body Battery read at most once per minute.
+        // Rebuild every cached value/string only when the displayed minute changes.
         if (clockTime.min != mCacheMin) {
             mCacheMin = clockTime.min;
-            mBodyBattery = getBodyBattery();
+            refreshCache(dc, clockTime);
         }
 
-        var info = ActivityMonitor.getInfo();
-        var settings = System.getDeviceSettings();
+        var cx = dc.getWidth() / 2;
+
+        // Opaque black base for this frame.
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
+        dc.clear();
+        // The whole face is white-on-transparent, and nothing changes the foreground
+        // afterward, so set the pen once here instead of before every draw. (drawIcon
+        // needs no color: drawBitmap renders from the bitmap's own palette.)
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
 
         drawHeartRate(dc);
-        drawStats(dc, info, settings);
-        drawBigTime(dc, cx, clockTime);
+        drawStats(dc);
+        drawBigTime(dc, cx);
         drawDateLine(dc, cx);
-        drawStatusIcons(dc, cx, settings);
+        drawStatusIcons(dc, cx);
+    }
+
+    // Read every sensor/setting and build every display string. Called once per clock
+    // minute (and once on show) — never in the per-second high-power path.
+    private function refreshCache(dc as Dc, clockTime as System.ClockTime) as Void {
+        var info = ActivityMonitor.getInfo();
+        var settings = System.getDeviceSettings();
+        var stats = System.getSystemStats();
+
+        mBodyBattery = getBodyBattery();
+        mHrHistory = getHeartRateHistory();
+
+        // Hero time, honoring the device 12/24h setting (leading zero kept either way).
+        var h = clockTime.hour;
+        if (!settings.is24Hour) {
+            h = h % 12;
+            if (h == 0) {
+                h = 12;
+            }
+        }
+        mTimeText = h.format("%02d") + ":" + clockTime.min.format("%02d");
+
+        // Date line, e.g. "SAT 27.06".
+        var di = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
+        mDateText = DAY_NAMES[di.day_of_week - 1] + " "
+            + Lang.format("$1$.$2$", [di.day.format("%02d"), di.month.format("%02d")]);
+
+        // Left-column stats. Each shows "--" when its source is unavailable.
+        var s = (info == null) ? null : info.steps;
+        mStepsText = (s == null) ? "--" : groupThousands(s);
+        var bb = mBodyBattery;
+        mBodyText = (bb == null) ? "--" : (bb.format("%d") + "%");
+        var d = (info == null) ? null : info.distance;
+        mDistText = formatDistance(d, settings);
+
+        // Watch battery (cell + percentage), plus the measured width used to center
+        // the bottom status group.
+        mBattPct = stats.battery;
+        mBattText = mBattPct.toNumber().format("%d") + "%";
+        mBattTextW = dc.getTextWidthInPixels(mBattText, smallFont());
+
+        // Bottom-row flags. notificationCount is Garmin's count of active notifications.
+        var notif = settings.notificationCount;
+        mShowBell = (notif != null && notif > 0);
+        var alarms = settings.alarmCount;
+        mShowAlarm = (alarms != null && alarms > 0);
+        mShowBt = settings.phoneConnected;
     }
 
     // Heart rate in the top-right sub-window: a heart glyph + the bpm number (or
@@ -153,119 +230,95 @@ class NordicView extends WatchUi.WatchFace {
             sx = sub.x + sub.width / 2;
             sy = sub.y + sub.height / 2;
         } else {
-            sx = 144; sy = 31;
+            sx = HR_FALLBACK_X; sy = HR_FALLBACK_Y;
         }
         sx += HR_DX;  // nudge the heart+bpm to center them in the physical window
 
         drawIcon(dc, mIconHeart, sx, sy - 9);
-        var hr = getHeartRate();
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        var hr = currentHeartRate();
         dc.drawText(sx, sy + 8, labelFont(), (hr == null) ? "--" : hr.format("%d"),
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     // Left stat column: three icon + value rows in line — steps, Body Battery, and
-    // distance. Each value shows "--" when unavailable.
-    private function drawStats(dc as Dc, info as ActivityMonitor.Info?, settings as System.DeviceSettings) as Void {
-        // Steps.
+    // distance. Values are built once per minute in refreshCache.
+    private function drawStats(dc as Dc) as Void {
         drawIcon(dc, mIconSteps, STAT_X_ICON, STAT_Y_STEPS);
-        var s = (info == null) ? null : info.steps;
-        drawValue(dc, STAT_X_VAL, STAT_Y_STEPS, groupThousands((s == null) ? 0 : s));
+        drawValue(dc, STAT_X_VAL, STAT_Y_STEPS, mStepsText);
 
-        // Body Battery (cached), shown as a percentage.
         drawIcon(dc, mIconBody, STAT_X_ICON, STAT_Y_BODY);
-        var bb = mBodyBattery;
-        drawValue(dc, STAT_X_VAL, STAT_Y_BODY, (bb == null) ? "--" : (bb.format("%d") + "%"));
+        drawValue(dc, STAT_X_VAL, STAT_Y_BODY, mBodyText);
 
-        // Distance today.
         drawIcon(dc, mIconDistance, STAT_X_ICON, STAT_Y_DIST);
-        var d = (info == null) ? null : info.distance;
-        drawValue(dc, STAT_X_VAL, STAT_Y_DIST, formatDistance(d, settings));
+        drawValue(dc, STAT_X_VAL, STAT_Y_DIST, mDistText);
     }
 
     private function drawValue(dc as Dc, x as Number, y as Number, text as String) as Void {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(x, y, labelFont(), text,
             Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     // The hero: a big HH:MM, centered (the number font includes the ":" glyph).
-    private function drawBigTime(dc as Dc, cx as Number, clockTime as System.ClockTime) as Void {
-        var t = clockTime.hour.format("%02d") + ":" + clockTime.min.format("%02d");
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, TIME_Y, heroFont(), t,
+    private function drawBigTime(dc as Dc, cx as Number) as Void {
+        dc.drawText(cx, TIME_Y, heroFont(), mTimeText,
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     // The date directly below the time, in a small font (e.g. "SAT 27.06").
     private function drawDateLine(dc as Dc, cx as Number) as Void {
-        var info = Gregorian.info(Time.now(), Time.FORMAT_SHORT);
-        var text = DAY_NAMES[info.day_of_week - 1] + " "
-            + Lang.format("$1$.$2$", [info.day.format("%02d"), info.month.format("%02d")]);
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, DATE_Y, labelFont(), text,
+        dc.drawText(cx, DATE_Y, labelFont(), mDateText,
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     // Bottom status row: the watch battery (cell + "NN%") is always shown;
     // notifications, alarm, and Bluetooth icons follow only when active. The whole
     // group is centered by its measured width so the battery percentage fits.
-    private function drawStatusIcons(dc as Dc, cx as Number, settings as System.DeviceSettings) as Void {
-        // Battery element: the drawn cell + its percentage text.
-        var pct = System.getSystemStats().battery;
-        var pctText = pct.toNumber().format("%d") + "%";
-        var pctW = dc.getTextWidthInPixels(pctText, smallFont());
-        var batteryW = BATTERY_W + STATUS_GAP_PCT + pctW;
-
-        // Trailing status icons (only when active). notificationCount is Garmin's
-        // active/unread count, so the bell already shows only for unread.
-        var extras = [] as Array<Symbol>;
-        var notif = settings.notificationCount;
-        if (notif != null && notif > 0) {
-            extras.add(:bell);
-        }
-        var alarms = settings.alarmCount;
-        if (alarms != null && alarms > 0) {
-            extras.add(:alarm);
-        }
-        if (settings.phoneConnected) {
-            extras.add(:bluetooth);
-        }
+    private function drawStatusIcons(dc as Dc, cx as Number) as Void {
+        var batteryW = BATTERY_W + STATUS_GAP_PCT + mBattTextW;
+        var extras = (mShowBell ? 1 : 0) + (mShowAlarm ? 1 : 0) + (mShowBt ? 1 : 0);
 
         // Center the whole [battery + %] [icons...] group.
-        var totalW = batteryW + extras.size() * (STATUS_GAP_ICON + STATUS_ICON_W);
+        var totalW = batteryW + extras * (STATUS_GAP_ICON + STATUS_ICON_W);
         var x = cx - totalW / 2;
 
-        drawBatteryIcon(dc, x + BATTERY_W / 2, STATUS_Y, pct);
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + BATTERY_W + STATUS_GAP_PCT, STATUS_Y, smallFont(), pctText,
+        drawBatteryIcon(dc, x + BATTERY_W / 2, STATUS_Y, mBattPct);
+        dc.drawText(x + BATTERY_W + STATUS_GAP_PCT, STATUS_Y, smallFont(), mBattText,
             Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         x += batteryW;
 
-        for (var i = 0; i < extras.size(); i += 1) {
+        if (mShowBell) {
             x += STATUS_GAP_ICON;
-            var k = extras[i];
-            if (k == :bell) {
-                drawIcon(dc, mIconBell, x + STATUS_ICON_W / 2, STATUS_Y);
-            } else if (k == :alarm) {
-                drawIcon(dc, mIconAlarm, x + STATUS_ICON_W / 2, STATUS_Y);
-            } else {
-                drawIcon(dc, mIconBt, x + STATUS_ICON_W / 2, STATUS_Y);
-            }
+            drawIcon(dc, mIconBell, x + STATUS_ICON_W / 2, STATUS_Y);
+            x += STATUS_ICON_W;
+        }
+        if (mShowAlarm) {
+            x += STATUS_GAP_ICON;
+            drawIcon(dc, mIconAlarm, x + STATUS_ICON_W / 2, STATUS_Y);
+            x += STATUS_ICON_W;
+        }
+        if (mShowBt) {
+            x += STATUS_GAP_ICON;
+            drawIcon(dc, mIconBt, x + STATUS_ICON_W / 2, STATUS_Y);
             x += STATUS_ICON_W;
         }
     }
 
     // ---- data getters (all null-safe) ----------------------------------------
 
-    // Most recent heart rate in bpm, or null when no valid reading is available.
-    // Prefers Activity.Info (live during an activity); otherwise falls back to
-    // the newest all-day sample from ActivityMonitor's heart-rate history.
-    private function getHeartRate() as Number? {
+    // Most recent heart rate in bpm, or null when none is available. The live
+    // in-activity reading (Activity.Info) is checked every frame so HR feels current
+    // during a workout; otherwise we use the all-day history sample cached per minute.
+    private function currentHeartRate() as Number? {
         var info = Activity.getActivityInfo();
         if (info != null && info.currentHeartRate != null) {
             return info.currentHeartRate;
         }
+        return mHrHistory;
+    }
+
+    // Newest all-day heart-rate sample in bpm, or null. Uses a history iterator, so
+    // it is read once per minute (in refreshCache), not on every frame.
+    private function getHeartRateHistory() as Number? {
         var iterator = ActivityMonitor.getHeartRateHistory(1, true);
         if (iterator != null) {
             var sample = iterator.next();
@@ -324,22 +377,28 @@ class NordicView extends WatchUi.WatchFace {
 
     // ---- icons ---------------------------------------------------------------
 
-    // Draw a bitmap icon centered at (cx, cy). No-op if it failed to load.
+    // Draw a bitmap icon centered at (cx, cy). No-op if it failed to load. No
+    // setColor needed: drawBitmap renders from the bitmap's own (white) palette.
     private function drawIcon(dc as Dc, bmp as WatchUi.BitmapResource?, cx as Number, cy as Number) as Void {
         if (bmp != null) {
             dc.drawBitmap(cx - bmp.getWidth() / 2, cy - bmp.getHeight() / 2, bmp);
         }
     }
 
-    // Watch battery: an outlined cell + terminal nub + a charge-level fill.
+    // Watch battery: an outlined cell + terminal nub + a charge-level fill. All
+    // horizontal sizes derive from BATTERY_W so the cell stays consistent with the
+    // centering math in drawStatusIcons. cx is the cell center.
     private function drawBatteryIcon(dc as Dc, cx as Number, cy as Number, pct as Float) as Void {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        var left = cx - BATTERY_W / 2;          // body's left edge
+        var bodyW = BATTERY_W - BATTERY_NUB_W;  // outlined body width (nub sits to its right)
         dc.setPenWidth(1);
-        dc.drawRectangle(cx - 8, cy - 4, 14, 8);   // body
-        dc.fillRectangle(cx + 6, cy - 2, 2, 4);    // terminal nub
-        var fillW = (10 * pct / 100.0).toNumber();
+        dc.drawRectangle(left, cy - BATTERY_H / 2, bodyW, BATTERY_H);  // body
+        dc.fillRectangle(left + bodyW, cy - 2, BATTERY_NUB_W, 4);      // terminal nub
+        // Interior cavity is bodyW-2 wide (inside the 1px walls), starting 1px in, so
+        // a full charge fills it edge to edge.
+        var fillW = ((bodyW - 2) * pct / 100.0).toNumber();
         if (fillW > 0) {
-            dc.fillRectangle(cx - 6, cy - 2, fillW, 4);
+            dc.fillRectangle(left + 1, cy - 2, fillW, 4);
         }
     }
 

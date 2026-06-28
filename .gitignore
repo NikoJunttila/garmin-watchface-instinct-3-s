@@ -11,9 +11,9 @@ gen/
 *.iq
 
 # ─── Developer signing keys — personal, NEVER commit ───────────────────────
+# Canonical generated key is developer_key.der; the globs cover any .der/.pem,
+# and the bare name (no extension) is kept since the globs don't match it.
 developer_key
-developer_key.pem
-developer_key.der
 *.der
 *.pem
 

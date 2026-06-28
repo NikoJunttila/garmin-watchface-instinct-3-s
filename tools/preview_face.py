@@ -22,13 +22,19 @@ SC = 4
 WHITE = (255, 255, 255)
 GREY = (70, 70, 70)   # reference-only (e.g. the physical sub-window bezel); not drawn by the face
 
-# ---- LAYOUT (mirror of the constants in NordicView.mc) -------------------------
-CX = 88
+# ---- LAYOUT — keep IN SYNC with the consts in source/NordicView.mc -------------
+#   Names match NordicView.mc exactly. Monkey C consts can't be imported into Python,
+#   so any tweak there MUST be hand-copied here or the preview will lie. Values that
+#   must stay in sync: STAT_X_ICON / STAT_X_VAL / STAT_Y_STEPS / STAT_Y_BODY /
+#   STAT_Y_DIST, TIME_Y, DATE_Y, STATUS_Y, the HR sub-window center + HR_DX, and the
+#   battery block (BATTERY_W / BATTERY_H / BATTERY_NUB_W / STATUS_GAP_* /
+#   STATUS_ICON_W + the fill math) further down in main().
+CX = 88           # = screen width / 2 (176 / 2)
 STAT_X_ICON = 22
 STAT_X_VAL = 42
-STAT_Y1 = 30      # steps (left)
-STAT_Y2 = 52      # body battery (left)
-STAT_Y3 = 74      # distance (left) — in line with the others
+STAT_Y_STEPS = 30  # steps (left)
+STAT_Y_BODY = 52   # body battery (left)
+STAT_Y_DIST = 74   # distance (left) — in line with the others
 TIME_Y = 108
 DATE_Y = 146
 STATUS_Y = 167
@@ -112,7 +118,7 @@ def main():
 
     # HR sub-window (top-right): heart + bpm only, no drawn ring. The gray circle is
     # just a REFERENCE for the physical window bezel (not drawn by the face).
-    sx, sy, sr = 145, 31, 31   # 144 + HR_DX(1)
+    sx, sy, sr = 145, 31, 31   # HR_FALLBACK_X(144) + HR_DX(1)
     d.ellipse([sx-sr, sy-sr, sx+sr, sy+sr], outline=GREY, width=1)
     heart = load_icon("ic_heart.svg", 14)
     if heart:
@@ -120,9 +126,9 @@ def main():
     draw_text(img, label, sx, sy + 8, "80", justify="center")
 
     # Stats left column (3 rows): icon + value, all left-justified and in line.
-    rows = [(STAT_Y1, "ic_steps.svg", "8,431"),
-            (STAT_Y2, "ic_body.svg", "64%"),
-            (STAT_Y3, "ic_distance.svg", "3.21")]
+    rows = [(STAT_Y_STEPS, "ic_steps.svg", "8,431"),
+            (STAT_Y_BODY, "ic_body.svg", "64%"),
+            (STAT_Y_DIST, "ic_distance.svg", "3.21")]
     for (y, icon, val) in rows:
         ic = load_icon(icon, 18)
         if ic:
@@ -136,30 +142,35 @@ def main():
     draw_text(img, label, CX, DATE_Y, "SAT 27.06", justify="center")
 
     # Bottom status row: battery cell + "NN%", then sample icons, centered by width.
-    BATTERY_W, GAP_PCT, GAP_ICON, ICON_W = 16, 4, 10, 18
+    BATTERY_W, BATTERY_H, BATTERY_NUB_W = 16, 8, 2
+    STATUS_GAP_PCT, STATUS_GAP_ICON, STATUS_ICON_W = 4, 10, 18
     pct, pct_text = 85, "85%"
     pct_w = text_width(small[2], pct_text)
     extras = ["ic_bluetooth.svg"]   # sample active icon
-    total = BATTERY_W + GAP_PCT + pct_w + len(extras) * (GAP_ICON + ICON_W)
+    total = BATTERY_W + STATUS_GAP_PCT + pct_w + len(extras) * (STATUS_GAP_ICON + STATUS_ICON_W)
     x = CX - total / 2
-    bx = x + BATTERY_W / 2           # battery cell center
-    d.rectangle([bx-8, STATUS_Y-4, bx+6, STATUS_Y+4], outline=WHITE)   # body
-    d.rectangle([bx+6, STATUS_Y-2, bx+8, STATUS_Y+2], fill=WHITE)      # nub
-    fw = int(10 * pct / 100)
+    bx = x + BATTERY_W / 2                 # battery cell center
+    left = bx - BATTERY_W / 2              # body's left edge
+    body_w = BATTERY_W - BATTERY_NUB_W     # outlined body width; nub sits to its right
+    top = STATUS_Y - BATTERY_H // 2
+    # PIL rectangle() is inclusive of both corners, so widths/heights subtract 1.
+    d.rectangle([left, top, left + body_w - 1, top + BATTERY_H - 1], outline=WHITE)   # body
+    d.rectangle([left + body_w, STATUS_Y-2, left + body_w + BATTERY_NUB_W - 1, STATUS_Y+2], fill=WHITE)  # nub
+    fw = int((body_w - 2) * pct / 100)    # interior cavity is body_w-2 wide, starting 1px in
     if fw > 0:
-        d.rectangle([bx-6, STATUS_Y-2, bx-6+fw, STATUS_Y+2], fill=WHITE)  # fill
-    draw_text(img, small, x + BATTERY_W + GAP_PCT, STATUS_Y, pct_text, justify="left")
-    x += BATTERY_W + GAP_PCT + pct_w
+        d.rectangle([left + 1, STATUS_Y-2, left + fw, STATUS_Y+2], fill=WHITE)  # fill
+    draw_text(img, small, x + BATTERY_W + STATUS_GAP_PCT, STATUS_Y, pct_text, justify="left")
+    x += BATTERY_W + STATUS_GAP_PCT + pct_w
     for e in extras:
-        x += GAP_ICON
-        ic = load_icon(e, ICON_W)
+        x += STATUS_GAP_ICON
+        ic = load_icon(e, STATUS_ICON_W)
         if ic:
-            img.paste(Image.new("RGB", ic.size, WHITE), (int(x + ICON_W/2 - 9), STATUS_Y - 9), ic)
-        x += ICON_W
+            img.paste(Image.new("RGB", ic.size, WHITE), (int(x + STATUS_ICON_W/2 - 9), STATUS_Y - 9), ic)
+        x += STATUS_ICON_W
 
     img.resize((S*SC, S*SC), Image.NEAREST).save("/tmp/nordic_preview.png")
-    print("wrote /tmp/nordic_preview.png  (layout: TIME_Y=%d DATE_Y=%d stats=%d,%d)"
-          % (TIME_Y, DATE_Y, STAT_Y1, STAT_Y2))
+    print("wrote /tmp/nordic_preview.png  (layout: TIME_Y=%d DATE_Y=%d stats=%d,%d,%d)"
+          % (TIME_Y, DATE_Y, STAT_Y_STEPS, STAT_Y_BODY, STAT_Y_DIST))
 
 
 if __name__ == "__main__":

@@ -1,11 +1,13 @@
 # Fonts
 
-Two custom **1-bit bitmap fonts** for the watch face, declared in `fonts.xml`:
+Three custom **1-bit bitmap fonts** for the watch face, declared in `fonts.xml`:
 
 - `nordic_hero.{fnt,png}` — the big "HH:MM" time. Digits + `:` only, mono-width digits
   (so the clock never shifts position between minutes).
 - `nordic_label.{fnt,png}` — stat values, the date line, and heart-rate bpm. Digits,
   A–Z, and the punctuation the face draws (`. , : % - /`).
+- `nordic_small.{fnt,png}` — the watch-battery percentage in the bottom status row.
+  Digits + `%` only (a smaller size than the label font, which looked oversized there).
 
 ## Why bitmap + `antialias="false"`
 

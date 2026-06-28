@@ -24,8 +24,3 @@ class NordicApp extends Application.AppBase {
     }
 
 }
-
-// Convenience accessor used elsewhere in larger apps.
-function getApp() as NordicApp {
-    return Application.getApp() as NordicApp;
-}
