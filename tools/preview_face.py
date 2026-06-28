@@ -144,6 +144,7 @@ def main():
     # Bottom status row: battery cell + "NN%", then sample icons, centered by width.
     BATTERY_W, BATTERY_H, BATTERY_NUB_W = 16, 8, 2
     STATUS_GAP_PCT, STATUS_GAP_ICON, STATUS_ICON_W = 4, 10, 18
+    STATUS_PCT_DY = -2   # nudge the battery % text up to align with the cell
     pct, pct_text = 85, "85%"
     pct_w = text_width(small[2], pct_text)
     extras = ["ic_bluetooth.svg"]   # sample active icon
@@ -159,7 +160,7 @@ def main():
     fw = int((body_w - 2) * pct / 100)    # interior cavity is body_w-2 wide, starting 1px in
     if fw > 0:
         d.rectangle([left + 1, STATUS_Y-2, left + fw, STATUS_Y+2], fill=WHITE)  # fill
-    draw_text(img, small, x + BATTERY_W + STATUS_GAP_PCT, STATUS_Y, pct_text, justify="left")
+    draw_text(img, small, x + BATTERY_W + STATUS_GAP_PCT, STATUS_Y + STATUS_PCT_DY, pct_text, justify="left")
     x += BATTERY_W + STATUS_GAP_PCT + pct_w
     for e in extras:
         x += STATUS_GAP_ICON

@@ -47,6 +47,7 @@ const BATTERY_NUB_W = 2;     // terminal nub width (included in BATTERY_W)
 const STATUS_GAP_PCT = 4;    // gap between the battery cell and its percentage
 const STATUS_GAP_ICON = 10;  // gap before each trailing status icon
 const STATUS_ICON_W = 18;    // width of a status icon
+const STATUS_PCT_DY = -2;    // nudge the battery % text up to align with the cell
 
 // "Nordic": a clean, minimal monochrome data face for the Instinct 3 Solar
 // (176x176, 1-bit black + white MIP, semi-octagon with a top-right circular
@@ -282,7 +283,7 @@ class NordicView extends WatchUi.WatchFace {
         var x = cx - totalW / 2;
 
         drawBatteryIcon(dc, x + BATTERY_W / 2, STATUS_Y, mBattPct);
-        dc.drawText(x + BATTERY_W + STATUS_GAP_PCT, STATUS_Y, smallFont(), mBattText,
+        dc.drawText(x + BATTERY_W + STATUS_GAP_PCT, STATUS_Y + STATUS_PCT_DY, smallFont(), mBattText,
             Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         x += batteryW;
 
